@@ -1,4 +1,4 @@
-import { createRecordStore, recordKey, mergeScan } from "./store.js";
+import { createRecordStore, recordKey, mergeScan, settingsForAccount } from "./store.js";
 import { createBrowserAdapter } from "./browser.js";
 import { createDemoAdapter } from "./demo.js";
 import { buildWeeks } from "./weeks.js";
@@ -12,7 +12,7 @@ const recordStore = createRecordStore(demo ? {
   async set(values) { for (const [key, value] of Object.entries(values)) localStorage.setItem(key, JSON.stringify(value)); }
 } : chrome.storage.local);
 let settings = { startDate: "", weekCount: 12, breakStart: "", includePass: false };
-async function saveRecord() { if (schedule) await recordStore.save(recordKey(schedule), schedule, outcomes); }
+async function saveRecord() { if (schedule) await recordStore.save(recordKey(schedule), schedule, outcomes, settings); }
 function renderRate() {
   const rate = schedule?.overallRate;
   $("overall-rate").textContent = typeof rate === "number" ? `${rate}%` : "暂未读取";
@@ -47,8 +47,8 @@ function setSettingsFields() {
   $("include-pass").checked = Boolean(settings.includePass);
 }
 async function saveSettings() {
-  if (demo) localStorage.setItem("attendance-helper-calendar-v2", JSON.stringify(settings));
-  else await chrome.storage.local.set({ calendar: settings });
+  if (!schedule) throw new Error("请先连接学校账户，再保存该账户的学期设置。");
+  await saveRecord();
 }
 function selectedRows() {
   return model?.weeks.flatMap(week => week.rows).filter(row => row.canSubmit && drafts.get(row.key)?.trim()) || [];
@@ -56,8 +56,8 @@ function selectedRows() {
 function updateControls() {
   $("connect").disabled = busy;
   $("refresh").disabled = busy || !schedule;
-  $("save-settings").disabled = busy;
-  for (const id of ["start-date", "week-count", "break-start", "include-pass"]) $(id).disabled = busy;
+  $("save-settings").disabled = busy || !schedule;
+  for (const id of ["start-date", "week-count", "break-start", "include-pass"]) $(id).disabled = busy || !schedule;
   for (const input of document.querySelectorAll("input[data-key]")) {
     input.disabled = busy || input.dataset.available !== "true";
   }
@@ -168,6 +168,13 @@ async function connect() {
     const next = await adapter.connect();
     const saved = next.account ? await recordStore.load(recordKey(next)) : null;
     const same = schedule && recordKey(schedule) === recordKey(next);
+    if (!same) {
+      drafts.clear();
+      rendered = false;
+      settings = settingsForAccount(next, saved);
+      $("result-text").textContent = "";
+    }
+    setSettingsFields();
     outcomes = same ? outcomes : saved?.outcomes || {};
     schedule = mergeScan(same ? schedule : saved?.schedule, next);
     await saveRecord();
@@ -215,6 +222,7 @@ $("submit-all").addEventListener("click", async () => {
   $("result-text").textContent = "";
   let done = 0;
   let hasUncertain = false;
+  let accountChanged = false;
   for (const item of batch) {
     // A long batch may cross a deadline; check each course immediately before submitting.
     const live = buildWeeks(schedule, settings, outcomes).weeks.flatMap(week => week.rows).find(row => row.key === item.row.key);
@@ -227,7 +235,12 @@ $("submit-all").addEventListener("click", async () => {
     outcomes[item.row.key] = { status: "pending", attempted: true, text: "正在提交" };
     try {
       const result = await adapter.submit({ ...item.row.course,
-        ...(item.row.deadline ? { deadline: item.row.deadline } : {}) }, item.code);
+        ...(item.row.deadline ? { deadline: item.row.deadline } : {}) }, item.code, schedule.account);
+      if (result.accountChanged) {
+        delete outcomes[item.row.key];
+        accountChanged = true;
+        break;
+      }
       outcomes[item.row.key] = { ...result, text: String(result.text || "").split(item.code).join("[签到码已隐藏]"), attempted: true };
       const label = result.status === "success" ? "已确认成功" : result.status === "unavailable" ? "提交失败或无法签到" : "结果待确认";
       $("result-text").textContent += `${item.row.date} ${item.row.time} ${item.row.unit} ${item.row.activity}\n${label}\n${result.text}\n\n`;
@@ -244,12 +257,33 @@ $("submit-all").addEventListener("click", async () => {
     try { await saveRecord(); } catch (error) { $("result-text").textContent += `记录保存失败：${error.message}\n`; }
   }
   for (const item of batch) item.code = "";
+  if (accountChanged) {
+    drafts.clear();
+    schedule = null;
+    outcomes = {};
+    busy = false;
+    renderRate();
+    renderWeeks();
+    $("account").textContent = "账户已变化或无法核实";
+    status("已停止提交，请重新连接", "学校登录账户已变化或无法核实。剩余课次未提交，已清空输入的签到码。", "warning");
+    return;
+  }
   try {
     const next = await adapter.connect();
     if (recordKey(next) === recordKey(schedule)) {
       schedule = mergeScan(schedule, next);
       await saveRecord();
       renderRate();
+    } else {
+      drafts.clear();
+      schedule = null;
+      outcomes = {};
+      busy = false;
+      renderRate();
+      renderWeeks();
+      $("account").textContent = "账户已变化";
+      status("请重新连接", "学校账户已切换，请重新连接以载入对应设置和记录。", "warning");
+      return;
     }
   } catch { /* Keep confirmed results if the rate refresh fails. */ }
   busy = false;
@@ -275,11 +309,6 @@ $("demo-banner").hidden = !demo;
 $("today").textContent = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Kuala_Lumpur", month: "long", day: "numeric", weekday: "long"
 }).format(new Date());
-try {
-  const saved = demo ? JSON.parse(localStorage.getItem("attendance-helper-calendar-v2") || "null")
-    : (await chrome.storage.local.get("calendar")).calendar;
-  if (saved) { buildWeeks({ days: [], courses: [] }, saved); settings = saved; }
-} catch { /* Invalid or unavailable saved settings should not stop the interface. */ }
 setSettingsFields();
 status("准备开始", "先在学校网页登录，再连接课表并设置学期日期。");
 renderWeeks();

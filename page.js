@@ -69,7 +69,11 @@ export function classifyAttendanceResult(text) {
   return "pending";
 }
 
-export function submitAttendance({ expectedUrl, code, deadline }) {
+export function submitAttendance({ expectedUrl, code, deadline, expectedAccount }) {
+  if (expectedAccount !== undefined && (!expectedAccount ||
+      document.getElementById("ctl00_ContentPlaceHolder1_userName")?.textContent.trim() !== expectedAccount)) {
+    return { submitted: false, accountChanged: true, reason: "账户已变化或无法核实，请重新连接。" };
+  }
   const current = new URL(location.href);
   let expected;
   try { expected = new URL(expectedUrl); }
@@ -117,7 +121,8 @@ export function submitAttendance({ expectedUrl, code, deadline }) {
 }
 
 export function readPageResult() {
-  return { url: location.href, text: document.body.innerText, documentId: globalThis.performance?.timeOrigin,
+  return { url: location.href, text: document.body.innerText,
+    account: document.getElementById("ctl00_ContentPlaceHolder1_userName")?.textContent.trim() || "", documentId: globalThis.performance?.timeOrigin,
     hasForm: Boolean(document.getElementById("ctl00_ContentPlaceHolder1_sessionCode")),
     ready: document.readyState === "complete" };
 }
@@ -126,4 +131,16 @@ export function readOverallRate() {
   const text = document.getElementById("ctl00_ContentPlaceHolder1_attendanceInfoBox")?.textContent || "";
   const match = text.match(/(\d+(?:\.\d+)?)\s*%/);
   return match && Number(match[1]) <= 100 ? Number(match[1]) : null;
+}
+
+// Fetch a fresh authenticated page: an already-open tab may still show the old user.
+export async function readSessionAccount() {
+  try {
+    const response = await fetch("https://attendance.monash.edu.my/student/", {
+      credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok || !response.url.startsWith("https://attendance.monash.edu.my/student/")) return "";
+    const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+    return doc.getElementById("ctl00_ContentPlaceHolder1_userName")?.textContent.trim() || "";
+  } catch { return ""; }
 }

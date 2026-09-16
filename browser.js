@@ -1,4 +1,4 @@
-import { readOverallRate, readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult } from "./page.js";
+import { readSessionAccount, readOverallRate, readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult } from "./page.js";
 
 const HOME = "https://attendance.monash.edu.my/student/";
 const UNITS = `${HOME}Units.aspx`;
@@ -11,6 +11,9 @@ const samePage = (current, expected) => current.origin === expected.origin &&
 
 export function createBrowserAdapter() {
   let tabId;
+  let connectedAccount = "";
+  const accountFailure = () => ({ status: "pending", uncertain: false, accountChanged: true,
+    text: "学校账户已变化或无法核实，请重新连接。" });
   async function run(func, args = []) {
     const results = await chrome.scripting.executeScript({ target: { tabId }, func, args });
     return results[0]?.result;
@@ -32,6 +35,7 @@ export function createBrowserAdapter() {
   }
   return {
     async connect() {
+      connectedAccount = "";
       const tabs = await chrome.tabs.query({ url: `${HOME}*` });
       const selected = tabs.find(tab => tab.id === tabId) ||
         [...tabs].sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
@@ -44,6 +48,8 @@ export function createBrowserAdapter() {
       await waitForSchoolPage();
       await chrome.tabs.update(tabId, { url: HOME });
       await waitForSchoolPage(HOME);
+      const account = await run(readSessionAccount);
+      if (!account) throw new Error("无法核实学校账户，请重新登录后连接。");
       const overallRate = await run(readOverallRate);
       await chrome.tabs.update(tabId, { url: INFO });
       await waitForSchoolPage(INFO);
@@ -53,9 +59,13 @@ export function createBrowserAdapter() {
       await waitForSchoolPage(UNITS);
       const schedule = await run(readSchedule);
       if (!schedule) throw new Error("未读取到课程列表，请检查学校网页是否已登录或是否变更了页面。");
+      if (!semester?.start || schedule.account !== account || await run(readSessionAccount) !== account) {
+        throw new Error("连接期间账户已变化，或无法读取学期，请重新连接。");
+      }
+      connectedAccount = account;
       return { ...schedule, semester, overallRate };
     },
-    async submit(course, code) {
+    async submit(course, code, expectedAccount = connectedAccount) {
       if (!tabId) throw new Error("请先连接签到网页。");
       const url = new URL(course.url);
       if (url.origin !== "https://attendance.monash.edu.my" ||
@@ -78,13 +88,17 @@ export function createBrowserAdapter() {
         }
         if (Date.now() >= cutoff) return { status: "unavailable", uncertain: false, text: "已超过7天签到期限。" };
       }
+      try {
+        if (!expectedAccount || expectedAccount !== connectedAccount || await run(readSessionAccount) !== expectedAccount) return accountFailure();
+      } catch { return accountFailure(); }
       let response;
       try {
-        response = await run(submitAttendance, [{ expectedUrl: course.url, code, deadline: course.deadline }]);
+        response = await run(submitAttendance, [{ expectedUrl: course.url, code, deadline: course.deadline, expectedAccount: connectedAccount }]);
       } catch {
         // Navigation may interrupt the response after a click. Never retry automatically.
         response = { submitted: true, beforeText: "", interrupted: true };
       }
+      if (response?.accountChanged) return accountFailure();
       if (response?.submitted === false) return { status: "unavailable", uncertain: false,
         text: response?.reason || "表单未提交，请检查学校网页。" };
       if (!response?.submitted) return { status: "pending", uncertain: true,
@@ -95,6 +109,7 @@ export function createBrowserAdapter() {
         await pause(250);
         try {
           const page = await run(readPageResult);
+          if (page?.ready && page.account !== connectedAccount) return accountFailure();
           if (page?.ready && new URL(page.url).pathname === "/student/Units.aspx") break;
           if (page?.ready && (page.url !== course.url || page.text !== response.beforeText || (page.documentId && response.documentId && page.documentId !== response.documentId))) {
             const freshText = page.documentId && response.documentId && page.documentId !== response.documentId ? page.text : page.text.split(/\r?\n/)
@@ -113,6 +128,7 @@ export function createBrowserAdapter() {
         await chrome.tabs.update(tabId, { url: UNITS });
         await waitForSchoolPage(UNITS);
         const scanned = await run(readSchedule);
+        if (scanned?.account !== connectedAccount) return accountFailure();
         const completed = scanned?.courses.find(item => item.day === course.day && item.label === course.label && item.status === "success");
         if (completed) return { status: "success", uncertain: false, text: "学校课程列表已标记签到成功。" };
       } catch { /* Leave this course uncertain without repeating its POST. */ }

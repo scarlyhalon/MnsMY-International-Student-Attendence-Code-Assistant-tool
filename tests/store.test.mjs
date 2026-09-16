@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeScan, recordKey, createRecordStore } from "../store.js";
+import { mergeScan, recordKey, createRecordStore, settingsForAccount } from "../store.js";
 import { buildWeeks } from "../weeks.js";
 const now = new Date("2026-09-17T00:00:00+08:00");
 const settings = { startDate: "2026-09-07", weekCount: 4 };
@@ -59,4 +59,25 @@ test("records persist across store instances and isolate accounts and semesters"
   assert.equal(reloaded.schedule.courses.length, 3);
   assert.equal(await createRecordStore(storage).load(recordKey({ ...saved, account: "two" })), null);
   assert.notEqual(key, recordKey({ ...saved, semester: { start: "2027-01-01" } }));
+});
+
+
+test("calendar and PASS settings are isolated by account and semester and survive result saves", async () => {
+  let db = {};
+  const storage = { async get(key) { return structuredClone({ [key]: db[key] }); }, async set(value) { db = structuredClone(value); } };
+  const store = createRecordStore(storage);
+  const a = scan;
+  const b = { ...scan, account: "two" };
+  const calendar = { startDate: "2026-09-07", weekCount: 15, breakStart: "2026-10-05", includePass: true };
+  await store.save(recordKey(a), a, {}, calendar);
+  assert.deepEqual(settingsForAccount(a, await store.load(recordKey(a))), calendar);
+  const defaults = settingsForAccount(b, await store.load(recordKey(b)));
+  assert.equal(defaults.weekCount, 12);
+  assert.equal(defaults.breakStart, "");
+  assert.equal(defaults.includePass, false);
+  await store.save(recordKey(b), b, {}, defaults);
+  await store.save(recordKey(a), a, { done: { status: "success" } });
+  assert.deepEqual(settingsForAccount(a, await store.load(recordKey(a))), calendar);
+  const nextTerm = { ...a, semester: { start: "2027-02-01" } };
+  assert.equal(settingsForAccount(nextTerm, await store.load(recordKey(nextTerm))).startDate, "2027-02-01");
 });

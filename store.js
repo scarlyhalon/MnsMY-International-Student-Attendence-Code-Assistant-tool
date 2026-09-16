@@ -22,11 +22,17 @@ export function mergeScan(previous, next, now = new Date()) {
 export function createRecordStore(storage) {
   return {
     async load(key) { return (await storage.get("attendanceRecords" )).attendanceRecords?.[key] || null; },
-    async save(key, schedule, outcomes) {
+    async save(key, schedule, outcomes, settings) {
       if (!schedule.account) return;
       const records = (await storage.get("attendanceRecords")).attendanceRecords || {};
-      records[key] = { schedule, outcomes, updatedAt: new Date().toISOString() };
+      records[key] = { settings: settings || records[key]?.settings, schedule, outcomes, updatedAt: new Date().toISOString() };
       await storage.set({ attendanceRecords: records });
     }
+  };
+}
+
+export function settingsForAccount(schedule, saved) {
+  return saved?.settings ? { ...saved.settings } : {
+    startDate: schedule.semester?.start || "", weekCount: 12, breakStart: "", includePass: false
   };
 }

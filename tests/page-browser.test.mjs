@@ -8,7 +8,7 @@ const browserSource = fs.readFileSync(new URL("../browser.js", import.meta.url),
 const HOME = "https://attendance.monash.edu.my/student/";
 const ENTRY = `${HOME}Entry.aspx?s=FIT2102-W&d=2026-09-15`;
 const COURSE = { url: ENTRY, day: "2026-09-15", label: "FIT2102 Workshop" };
-const SCHEDULE = { days: [{ value: COURSE.day, label: "15 September" }], courses: [COURSE], selectedDay: COURSE.day };
+const SCHEDULE = { account: "Example Student", days: [{ value: COURSE.day, label: "15 September" }], courses: [COURSE], selectedDay: COURSE.day };
 
 function pageFixture({ url = ENTRY, valid = true, inputPresent = true, formPresent = true, now = Date.now } = {}) {
   const calls = [];
@@ -49,7 +49,7 @@ function pageFixture({ url = ENTRY, valid = true, inputPresent = true, formPrese
   };
   class Clock extends Date { static now() { return now(); } }
   const context = vm.createContext({ document, location: { href: url }, URL, HTMLInputElement: Input, Event, Date: Clock });
-  vm.runInContext(pageSource.replaceAll("export function", "function") + "\nthis.api = { readOverallRate, readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult };", context);
+  vm.runInContext(pageSource.replaceAll("export function", "function").replaceAll("export async function", "async function") + "\nthis.api = { readOverallRate, readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult };", context);
   return { ...context.api, calls, input, button, document,
     panels(value) { panels = value; },
     rate(text) { rate = { textContent: text }; },
@@ -217,7 +217,7 @@ test("in-page deadline is rechecked immediately before clicking", () => {
 
 function adapterFixture({ submitError = false, unchanged = false, submitted = true,
   beforeText = "Original entry form", resultText = "Invalid attendance code", now = Date.now,
-  onEntryReady = () => {}, completed = false, newDocument = false } = {}) {
+  onEntryReady = () => {}, completed = false, newDocument = false, sessionAccount = () => "Example Student" } = {}) {
   const calls = [];
   let current = { id: 1, windowId: 2, url: `${HOME}Units.aspx`, status: "complete" };
   let queuedTabs = [];
@@ -242,6 +242,7 @@ function adapterFixture({ submitError = false, unchanged = false, submitted = tr
     scripting: {
       async executeScript({ func, args }) {
         calls.push(["script", func.name, args]);
+        if (func.name === "readSessionAccount") return [{ result: sessionAccount() }];
         if (func.name === "readOverallRate") return [{ result: 79 }];
         if (func.name === "readSchedule") return [{ result: completed ? { ...SCHEDULE, courses: [{ ...COURSE, status: "success" }] } : SCHEDULE }];
         if (func.name === "readSemester") return [{ result: { start: "2026-07-27", end: "2026-10-23" } }];
@@ -253,12 +254,12 @@ function adapterFixture({ submitError = false, unchanged = false, submitted = tr
         }
         resultReads++;
         const text = Array.isArray(resultText) ? resultText[Math.min(resultReads - 2, resultText.length - 1)] : resultText;
-        return [{ result: { url: ENTRY, ready: true, documentId: newDocument ? 2 : undefined, text: unchanged || resultReads === 1 ? beforeText : text } }];
+        return [{ result: { url: ENTRY, ready: true, account: "Example Student", documentId: newDocument ? 2 : undefined, text: unchanged || resultReads === 1 ? beforeText : text } }];
       }
     }
   };
   class Clock extends Date { static now() { return now(); } }
-  const context = vm.createContext({ chrome, URL, Date: Clock, readOverallRate() {}, readSchedule() {}, readSemester() {}, submitAttendance() {}, readPageResult() {},
+  const context = vm.createContext({ chrome, URL, Date: Clock, readSessionAccount() {}, readOverallRate() {}, readSchedule() {}, readSemester() {}, submitAttendance() {}, readPageResult() {},
     classifyAttendanceResult: pageFixture().classifyAttendanceResult, setTimeout(fn) { queueMicrotask(fn); } });
   vm.runInContext(browserSource.replace(/^import.*\r?\n/, "").replace("export function", "function") + "\nthis.adapter = createBrowserAdapter();", context);
   return { adapter: context.adapter, calls, setCurrent(url) { current = { ...current, url, status: "complete" }; queuedTabs = []; } };
@@ -282,7 +283,7 @@ test("adapter waits past stale and loading tabs before injecting into the select
   assert.equal(response.uncertain, false);
   assert.equal(response.text, "Invalid attendance code");
   const submitIndex = calls.findIndex(call => call[0] === "script" && call[1] === "submitAttendance");
-  assert.deepEqual(calls[submitIndex - 1], ["get", ENTRY, "complete"]);
+  assert.equal(calls[submitIndex - 1][1], "readSessionAccount");
   assert.equal(calls.filter(call => call[0] === "script" && call[1] === "submitAttendance").length, 1);
 });
 
@@ -425,4 +426,43 @@ test("incorrect code feedback allows correction, including the same error after 
   const result = await adapter.submit(COURSE, "wrong");
   assert.equal(result.status, "unavailable");
   assert.equal(result.retryable, true);
+});
+
+
+test("fresh session change or missing identity prevents any submission", async () => {
+  for (const identity of ["Different Student", ""]) {
+    let current = "Example Student";
+    const { adapter, calls } = adapterFixture({ sessionAccount: () => current });
+    await adapter.connect();
+    current = identity;
+    const result = await adapter.submit(COURSE, "1234", "Example Student");
+    assert.equal(result.accountChanged, true);
+    assert.equal(calls.filter(call => call[1] === "submitAttendance").length, 0);
+  }
+});
+
+test("page account guard rejects changed and absent identities before filling", () => {
+  for (const identity of ["Different Student", ""]) {
+    const page = pageFixture();
+    page.account(identity);
+    assert.equal(page.submitAttendance({ expectedUrl: ENTRY, code: "1234", expectedAccount: "Example Student" }).accountChanged, true);
+    assert.equal(page.calls.length, 0);
+  }
+});
+
+test("caller identity cannot silently change when adapter reconnects", async () => {
+  const { adapter, calls } = adapterFixture();
+  await adapter.connect();
+  const result = await adapter.submit(COURSE, "1234", "Previous Student");
+  assert.equal(result.accountChanged, true);
+  assert.equal(calls.filter(call => call[1] === "submitAttendance").length, 0);
+});
+
+
+test("matching account permits the original form submission", () => {
+  const page = pageFixture();
+  page.account("Example Student");
+  const result = page.submitAttendance({ expectedUrl: ENTRY, code: "1234", expectedAccount: "Example Student" });
+  assert.equal(result.submitted, true);
+  assert.equal(page.calls.filter(call => call[0] === "click").length, 1);
 });
