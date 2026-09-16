@@ -1,0 +1,11 @@
+# Local development artifacts
+node_modules/
+coverage/
+*.log
+*.zip
+.DS_Store
+Thumbs.db
+
+# Local editor settings
+.vscode/
+.idea/

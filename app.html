@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>签到助手 · 学期视图</title>
+    <link rel="stylesheet" href="app.css">
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5.5" width="16" height="15" rx="4" stroke="currentColor" stroke-width="1.7"/><path d="M8 3.5v4M16 3.5v4M4.5 10h15M9 15l2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><span class="brand-name">签到助手</span><span class="brand-caption">个人工具 · v0.2</span></div>
+        </div>
+        <button class="button button-text" id="open-site" type="button">打开学校网页 <span aria-hidden="true">↗</span></button>
+      </header>
+
+      <div class="demo-banner" id="demo-banner" hidden><span class="demo-dot" aria-hidden="true"></span>交互预览 · 使用模拟课程，不会提交真实签到</div>
+
+      <main>
+        <section class="page-heading" aria-labelledby="page-title">
+          <div><p class="eyebrow">SEMESTER ATTENDANCE</p><h1 id="page-title">学期签到</h1><p class="page-description">按周查看课次，填好签到码后统一提交。</p></div>
+          <div class="date-chip"><span class="date-dot" aria-hidden="true"></span><span id="today">今天</span></div>
+        </section>
+
+        <section class="connection-bar" aria-label="学校网页连接">
+          <div class="connection-summary"><span class="connection-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4.5" width="17" height="13" rx="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M8 20h8M12 17.5V20M4 8h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span><div><span class="connection-label">学校签到网页</span><span class="connection-account" id="account">请先在学校网页登录你的账户</span></div></div>
+          <div class="connection-actions"><button class="button button-secondary" id="refresh" type="button" disabled><span aria-hidden="true">↻</span> 刷新课程</button><button class="button button-primary button-connect" id="connect" type="button">连接签到网页</button></div>
+        </section>
+
+        <details class="settings-card" open>
+          <summary class="settings-summary"><span><span class="settings-icon" aria-hidden="true">◷</span> 学期设置</span><span class="settings-caption">定义教学周与期中假期 <span class="disclosure-chevron" aria-hidden="true"></span></span></summary>
+          <form id="settings-form">
+            <div class="settings-fields">
+              <div class="field"><label for="start-date">Week 1 起始日期</label><input id="start-date" name="start-date" type="date" required aria-describedby="start-help"><p class="field-help" id="start-help">填写第一教学周的第一天。</p></div>
+              <div class="field"><label for="week-count">教学周数</label><div class="number-input"><input id="week-count" name="week-count" type="number" min="1" max="52" value="12" required><span aria-hidden="true">周</span></div><p class="field-help">不包含期中假期。</p></div>
+              <div class="field"><label for="break-start">期中假期开始 <span class="optional">可选</span></label><input id="break-start" name="break-start" type="date" aria-describedby="break-help"><p class="field-help" id="break-help">从这天起休息 7 天，不计入教学周。</p></div>
+              <button class="button button-secondary" id="save-settings" type="submit">保存学期设置</button>
+            </div>
+          </form>
+        </details>
+
+        <section class="status-card" id="status" role="status" aria-live="polite" aria-atomic="true" data-state="idle">
+          <span class="status-indicator" aria-hidden="true"></span><div class="status-content"><h2 id="status-title">先连接学校签到网页</h2><p id="status-text">登录学校账户后，点击「连接签到网页」载入课程和签到状态。</p><pre id="result-text" hidden></pre></div>
+        </section>
+
+        <section class="semester-section" aria-labelledby="weeks-title">
+          <div class="semester-heading"><div><p class="eyebrow" id="range-note">YOUR TEACHING WEEKS</p><h2 id="weeks-title">每周课程</h2><p id="summary">展开教学周，查看固定课表与每节课的签到状态。</p></div><div class="legend" aria-label="签到状态说明"><span class="legend-item" data-state="pending"><span class="status-icon" aria-hidden="true">?</span>待处理 / 未开放</span><span class="legend-item" data-state="unavailable"><span class="status-icon" aria-hidden="true">×</span>不可签到 / 失败</span><span class="legend-item" data-state="success"><span class="status-icon" aria-hidden="true">✓</span>全部完成</span><span class="legend-item" data-state="empty"><span class="status-icon" aria-hidden="true">−</span>无课次</span></div></div>
+          <div id="weeks"></div>
+        </section>
+
+        <div class="submission-bar"><div><strong id="submission-count">尚未填写签到码</strong><p>只提交你已填写的课次，点击按钮后开始。</p></div><button class="button button-primary" id="submit-all" type="button" disabled>提交已填写的签到码 <span aria-hidden="true">→</span></button></div>
+      </main>
+
+      <footer class="app-footer"><span>个人辅助工具 · 非学校官方扩展</span><span>不保存签到码或学校密码 · 结果以学校系统记录为准</span></footer>
+    </div>
+  </body>
+</html>
