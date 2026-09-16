@@ -81,7 +81,7 @@ export function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) 
     if (!parsed?.parsed) unparsedCount++;
     if (!parsed) continue;
     const templateKey = `${parsed.weekday}|${parsed.identity}`;
-    if (!templates.has(templateKey)) templates.set(templateKey, parsed);
+    if (!schedule?.templateCourses && !templates.has(templateKey)) templates.set(templateKey, parsed);
     const liveKey = `${parsed.date}|${parsed.identity}`;
     const previous = live.get(liveKey);
     if (!previous || courseStatus(course) === "success"
@@ -101,7 +101,10 @@ export function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) 
     const rows = [];
     for (const date of dates) {
       const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
-      for (const template of templates.values()) {
+      const dayTemplates = schedule?.snapshotMode && date < schedule.templateFrom
+        ? [...live.entries()].filter(([key]) => key.startsWith(`${date}|`)).map(([, course]) => parseCourse(course))
+        : [...templates.values()];
+      for (const template of dayTemplates) {
         if (template.weekday !== weekday) continue;
         const course = live.get(`${date}|${template.identity}`) || null;
         const key = `${date}|${template.unit}|${template.time}|${template.activity}`;
@@ -115,7 +118,7 @@ export function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) 
           else if (!course?.url) { status = "unavailable"; reason = "无签到入口"; canSubmit = false; }
         }
         const outcome = outcomes[key];
-        if (outcome) {
+        if (outcome && status !== "success") {
           status = outcome.uncertain ? "pending" : courseStatus(outcome);
           reason = status === "success" ? "已签到" : status === "unavailable" ? "提交失败 / 无法签到"
             : outcome.uncertain ? "结果待确认" : "已提交，待确认";
@@ -131,15 +134,23 @@ export function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) 
             status = "pending"; reason = "未到上课时间"; canSubmit = false;
           }
         }
-        rows.push({ key, date, time: template.time, unit: template.unit, activity: template.activity,
+        const isPass = /\bPASS\b/i.test(template.label);
+        const excluded = isPass && !settings.includePass;
+        if (excluded) { status = "empty"; reason = "PASS 不计入辅助签到"; canSubmit = false; }
+        if (outcome?.text && status !== "success" && !excluded && outcome.retryable && start !== null && nowTime >= start && nowTime < start + 7 * DAY) {
+          reason = "签到码错误，请修改后重试";
+          canSubmit = Boolean(course?.url) && !excluded && nowTime >= start && nowTime < start + 7 * DAY;
+        }
+        rows.push({ isPass, excluded, key, date, time: template.time, unit: template.unit, activity: template.activity,
           activityType: template.activityType, activityNumber: template.activityNumber,
           label: template.label, course, status, reason, canSubmit, deadline });
       }
     }
     rows.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time)
       || a.unit.localeCompare(b.unit) || a.activity.localeCompare(b.activity));
-    const status = !rows.length ? "empty" : rows.every(row => row.status === "success") ? "success"
-      : rows.some(row => row.status === "unavailable") ? "unavailable" : "pending";
+    const included = rows.filter(row => !row.excluded);
+    const status = !included.length ? "empty" : included.every(row => row.status === "success") ? "success"
+      : included.some(row => row.status === "unavailable") ? "unavailable" : "pending";
     weeks.push({ number, start: dates[0], end: dates.at(-1), rows, status,
       isPast: Boolean(range.start && dates.at(-1) < range.start),
       isFuture: Boolean(range.end && dates[0] > range.end) });

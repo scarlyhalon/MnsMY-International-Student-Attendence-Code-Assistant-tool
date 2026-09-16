@@ -1,3 +1,4 @@
+import { createRecordStore, recordKey, mergeScan } from "./store.js";
 import { createBrowserAdapter } from "./browser.js";
 import { createDemoAdapter } from "./demo.js";
 import { buildWeeks } from "./weeks.js";
@@ -6,7 +7,18 @@ const $ = id => document.getElementById(id);
 const demo = location.protocol !== "chrome-extension:";
 const adapter = demo ? createDemoAdapter() : createBrowserAdapter();
 const drafts = new Map(); // Attendance codes stay in this page's memory only.
-let settings = { startDate: "", weekCount: 12, breakStart: "" };
+const recordStore = createRecordStore(demo ? {
+  async get(key) { return { [key]: JSON.parse(localStorage.getItem(key) || "null") }; },
+  async set(values) { for (const [key, value] of Object.entries(values)) localStorage.setItem(key, JSON.stringify(value)); }
+} : chrome.storage.local);
+let settings = { startDate: "", weekCount: 12, breakStart: "", includePass: false };
+async function saveRecord() { if (schedule) await recordStore.save(recordKey(schedule), schedule, outcomes); }
+function renderRate() {
+  const rate = schedule?.overallRate;
+  $("overall-rate").textContent = typeof rate === "number" ? `${rate}%` : "暂未读取";
+  $("overall-rate").style.color = typeof rate === "number" && rate < 80 ? "#c62828" : "";
+  $("rate-help").hidden = !(typeof rate === "number" && rate < 80);
+}
 let schedule = null;
 let outcomes = {};
 let model = null;
@@ -32,6 +44,7 @@ function setSettingsFields() {
   $("start-date").value = settings.startDate;
   $("week-count").value = settings.weekCount;
   $("break-start").value = settings.breakStart;
+  $("include-pass").checked = Boolean(settings.includePass);
 }
 async function saveSettings() {
   if (demo) localStorage.setItem("attendance-helper-calendar-v2", JSON.stringify(settings));
@@ -44,7 +57,7 @@ function updateControls() {
   $("connect").disabled = busy;
   $("refresh").disabled = busy || !schedule;
   $("save-settings").disabled = busy;
-  for (const id of ["start-date", "week-count", "break-start"]) $(id).disabled = busy;
+  for (const id of ["start-date", "week-count", "break-start", "include-pass"]) $(id).disabled = busy;
   for (const input of document.querySelectorAll("input[data-key]")) {
     input.disabled = busy || input.dataset.available !== "true";
   }
@@ -88,22 +101,24 @@ function renderWeeks() {
   for (const week of model.weeks) {
     const section = element("details", "week-card");
     section.dataset.week = week.number;
-    const unavailable = week.status === "unavailable" && !week.rows.some(row => row.canSubmit);
+    const missingHistory = !week.rows.length && week.isPast;
+    const unavailable = missingHistory || week.status === "unavailable" && !week.rows.some(row => row.canSubmit);
     section.classList.toggle("is-unavailable", unavailable);
-    const future = week.isFuture || (week.rows.length > 0 && week.rows.every(row =>
+    const future = week.isFuture || (week.rows.length > 0 && week.rows.filter(row => !row.excluded).every(row =>
       row.reason === "未开放" || row.reason === "未到上课时间"));
     section.classList.toggle("is-future", future);
     section.open = rendered ? open.has(week.number) : week.number === preferred;
     const header = element("summary", "week-summary");
     const heading = element("span", "week-heading");
     heading.append(element("strong", "", `Week ${week.number}`), element("span", "week-range", `${dateLabel(week.start)} — ${dateLabel(week.end)}`));
-    const done = week.rows.filter(row => row.status === "success").length;
-    const weekText = week.status === "success" ? "全部完成" : week.status === "unavailable"
+    const included = week.rows.filter(row => !row.excluded);
+    const done = included.filter(row => row.status === "success").length;
+    const weekText = missingHistory ? "历史记录未读取" : week.status === "success" ? "全部完成" : week.status === "unavailable"
       ? (week.rows.some(row => row.canSubmit) ? "部分课次无法签到" : "无法签到")
-      : future ? "未开放" : week.status === "empty" ? "无课程" : `待完成 · ${done}/${week.rows.length}`;
+      : future ? "未开放" : week.status === "empty" ? "无须签到" : `待完成 · ${done}/${included.length}`;
     header.append(heading, stateBadge(week.status, weekText, "week-state"));
     const body = element("div", "week-body");
-    if (!week.rows.length) body.append(element("p", "empty-week", "暂无可读取的固定课程。"));
+    if (!week.rows.length) body.append(element("p", "empty-week", "尚未保存这一周的课程记录。"));
     else {
       const columns = element("div", "course-table");
       for (const label of ["日期 / 时间", "课程", "类型 / 编号", "签到码", "状态"]) columns.append(element("span", "", label));
@@ -150,16 +165,13 @@ async function connect() {
   updateControls();
   status("正在连接", "正在读取学期日期、课程时间和当前签到入口…", "busy");
   try {
-    const previousAccount = schedule?.account;
     const next = await adapter.connect();
-    const sameAccount = previousAccount && previousAccount === next.account &&
-      schedule?.semester?.start === next.semester?.start;
-    const learned = sameAccount ? [...(schedule.templateCourses || []), ...schedule.courses] : [];
-    next.templateCourses = [...new Map([...learned, ...next.courses].map(course =>
-      [`${course.day}|${course.label}`, { day: course.day, label: course.label }])).values()];
-    outcomes = sameAccount
-      ? Object.fromEntries(Object.entries(outcomes).filter(([, value]) => value.status === "success" && !value.uncertain)) : {};
-    schedule = next;
+    const saved = next.account ? await recordStore.load(recordKey(next)) : null;
+    const same = schedule && recordKey(schedule) === recordKey(next);
+    outcomes = same ? outcomes : saved?.outcomes || {};
+    schedule = mergeScan(same ? schedule : saved?.schedule, next);
+    await saveRecord();
+    renderRate();
     if (!settings.startDate && next.semester?.start) {
       settings.startDate = next.semester.start;
       setSettingsFields();
@@ -167,7 +179,7 @@ async function connect() {
     }
     $("account").textContent = demo ? "模拟课堂" : `已连接${next.account ? ` · ${next.account}` : "学校网页"}`;
     status(demo ? "交互预览已就绪" : "固定课表已读取", demo
-      ? "可填写的课次输入任意码可演示成功；error 演示失败，unknown 演示结果不明确。"
+      ? "可填写的课次输入任意码可演示成功；error 演示失败，unknown 演示结果不明确，队列继续处理其他课程。"
       : "展开教学周，在课程右侧填写签到码，最后统一提交。请设置 Mid break 的开始日期。");
   } catch (error) {
     schedule = null;
@@ -181,7 +193,7 @@ async function connect() {
 $("settings-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (busy) return;
-  const next = { startDate: $("start-date").value, weekCount: Number($("week-count").value), breakStart: $("break-start").value };
+  const next = { startDate: $("start-date").value, weekCount: Number($("week-count").value), breakStart: $("break-start").value, includePass: $("include-pass").checked };
   try {
     buildWeeks(schedule || { days: [], courses: [] }, next, {});
     settings = next;
@@ -202,7 +214,7 @@ $("submit-all").addEventListener("click", async () => {
   $("result-text").hidden = false;
   $("result-text").textContent = "";
   let done = 0;
-  let stopped = false;
+  let hasUncertain = false;
   for (const item of batch) {
     // A long batch may cross a deadline; check each course immediately before submitting.
     const live = buildWeeks(schedule, settings, outcomes).weeks.flatMap(week => week.rows).find(row => row.key === item.row.key);
@@ -216,30 +228,43 @@ $("submit-all").addEventListener("click", async () => {
     try {
       const result = await adapter.submit({ ...item.row.course,
         ...(item.row.deadline ? { deadline: item.row.deadline } : {}) }, item.code);
-      outcomes[item.row.key] = { ...result, attempted: true };
+      outcomes[item.row.key] = { ...result, text: String(result.text || "").split(item.code).join("[签到码已隐藏]"), attempted: true };
       const label = result.status === "success" ? "已确认成功" : result.status === "unavailable" ? "提交失败或无法签到" : "结果待确认";
       $("result-text").textContent += `${item.row.date} ${item.row.time} ${item.row.unit} ${item.row.activity}\n${label}\n${result.text}\n\n`;
       done++;
-      if (result.uncertain) stopped = true;
+      if (result.uncertain) hasUncertain = true;
     } catch (error) {
       outcomes[item.row.key] = { status: "pending", attempted: true, uncertain: true, text: error.message };
       $("result-text").textContent += `${item.row.label}\n${error.message}\n\n`;
-      stopped = true;
+      hasUncertain = true;
     }
     drafts.delete(item.row.key);
     item.code = "";
     renderWeeks();
-    if (stopped) break;
+    try { await saveRecord(); } catch (error) { $("result-text").textContent += `记录保存失败：${error.message}\n`; }
   }
   for (const item of batch) item.code = "";
+  try {
+    const next = await adapter.connect();
+    if (recordKey(next) === recordKey(schedule)) {
+      schedule = mergeScan(schedule, next);
+      await saveRecord();
+      renderRate();
+    }
+  } catch { /* Keep confirmed results if the rate refresh fails. */ }
   busy = false;
   renderWeeks();
-  status(stopped ? "已暂停后续提交" : "本次提交已处理", stopped
-    ? "有一节课的结果无法确认，请打开学校网页检查。尚未处理的签到码仍留在输入框中；没有自动重试。"
-    : `已处理 ${done} 节课，请查看逐节结果。失败课次可在检查学校反馈后，点击“刷新课程”重新填写。`,
-    stopped ? "warning" : "info");
+  status(hasUncertain ? "批量处理完成，部分结果待确认" : "本次提交已处理", hasUncertain
+    ? "部分课次结果无法确认，请打开学校网页检查。其他已填写课次已继续处理；待确认课次没有重复提交。"
+    : `已处理 ${done} 节课，请查看逐节结果。签到码错误的课次可直接修改后再次提交。`,
+    hasUncertain ? "warning" : "info");
 });
 
+$("include-pass").addEventListener("change", async () => {
+  settings.includePass = $("include-pass").checked;
+  await saveSettings();
+  renderWeeks();
+});
 $("connect").addEventListener("click", connect);
 $("refresh").addEventListener("click", connect);
 $("open-site").addEventListener("click", async () => {

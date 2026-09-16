@@ -216,3 +216,6 @@ input:disabled, select:disabled { color: #919daf; background: #f9fafc; border-co
   .submission-bar p { margin-top: 3px; font-size: 9px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
+
+#overall-rate { font-size: 2rem; margin-left: 12px; }
+#rate-help { font-size: 12px; margin: 6px 0 0; }

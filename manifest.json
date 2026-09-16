@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "签到助手 · Attendance Helper",
   "description": "在自己的学校登录会话中，选择课次并提交老师提供的签到码。个人工具，非学校官方产品。",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "permissions": ["scripting", "storage"],
   "host_permissions": ["https://attendance.monash.edu.my/*"],
   "background": { "service_worker": "background.js" },

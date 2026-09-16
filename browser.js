@@ -1,4 +1,4 @@
-import { readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult } from "./page.js";
+import { readOverallRate, readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult } from "./page.js";
 
 const HOME = "https://attendance.monash.edu.my/student/";
 const UNITS = `${HOME}Units.aspx`;
@@ -42,6 +42,9 @@ export function createBrowserAdapter() {
       }
       tabId = selected.id;
       await waitForSchoolPage();
+      await chrome.tabs.update(tabId, { url: HOME });
+      await waitForSchoolPage(HOME);
+      const overallRate = await run(readOverallRate);
       await chrome.tabs.update(tabId, { url: INFO });
       await waitForSchoolPage(INFO);
       const semester = await run(readSemester);
@@ -50,7 +53,7 @@ export function createBrowserAdapter() {
       await waitForSchoolPage(UNITS);
       const schedule = await run(readSchedule);
       if (!schedule) throw new Error("未读取到课程列表，请检查学校网页是否已登录或是否变更了页面。");
-      return { ...schedule, semester };
+      return { ...schedule, semester, overallRate };
     },
     async submit(course, code) {
       if (!tabId) throw new Error("请先连接签到网页。");
@@ -80,7 +83,7 @@ export function createBrowserAdapter() {
         response = await run(submitAttendance, [{ expectedUrl: course.url, code, deadline: course.deadline }]);
       } catch {
         // Navigation may interrupt the response after a click. Never retry automatically.
-        return { status: "pending", uncertain: true, text: "提交时网页发生跳转或连接中断。请打开学校网页核对结果，避免重复提交。" };
+        response = { submitted: true, beforeText: "", interrupted: true };
       }
       if (response?.submitted === false) return { status: "unavailable", uncertain: false,
         text: response?.reason || "表单未提交，请检查学校网页。" };
@@ -88,19 +91,31 @@ export function createBrowserAdapter() {
         text: "暂未收到提交操作的反馈，请检查学校网页，避免重复提交。" };
       const previousLines = new Set(response.beforeText.split(/\r?\n/).map(line => line.replace(/\s+/g, " ").trim()));
       let latestText = "";
-      for (let attempt = 0; attempt < 40; attempt++) {
+      for (let attempt = 0; attempt < 16; attempt++) {
         await pause(250);
         try {
           const page = await run(readPageResult);
-          if (page?.ready && (page.url !== course.url || page.text !== response.beforeText)) {
-            const freshText = page.text.split(/\r?\n/)
+          if (page?.ready && new URL(page.url).pathname === "/student/Units.aspx") break;
+          if (page?.ready && (page.url !== course.url || page.text !== response.beforeText || (page.documentId && response.documentId && page.documentId !== response.documentId))) {
+            const freshText = page.documentId && response.documentId && page.documentId !== response.documentId ? page.text : page.text.split(/\r?\n/)
               .filter(line => !previousLines.has(line.replace(/\s+/g, " ").trim())).join("\n");
             const status = classifyAttendanceResult(freshText);
             latestText = page.text.trim().slice(0, 4000);
-            if (status !== "pending") return { status, uncertain: false, text: latestText };
+            if (status !== "pending") return { status, uncertain: false,
+              retryable: status === "unavailable" && /(?:invalid|incorrect|wrong).*code|code.*(?:invalid|incorrect|wrong)/i.test(freshText), text: latestText };
+            if (page.hasForm === false) break;
           }
         } catch { /* A normal document navigation can briefly make the tab unavailable. */ }
       }
+      // A successful POST can return the list instead of a textual confirmation.
+      // Read the exact session's official tick before deciding its result.
+      try {
+        await chrome.tabs.update(tabId, { url: UNITS });
+        await waitForSchoolPage(UNITS);
+        const scanned = await run(readSchedule);
+        const completed = scanned?.courses.find(item => item.day === course.day && item.label === course.label && item.status === "success");
+        if (completed) return { status: "success", uncertain: false, text: "学校课程列表已标记签到成功。" };
+      } catch { /* Leave this course uncertain without repeating its POST. */ }
       return { status: "pending", uncertain: true, text: latestText || "已执行一次提交，但暂未读取到新的网页反馈。请打开学校网页核对结果。" };
     },
     async openSite() {

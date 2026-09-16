@@ -10,7 +10,10 @@ export function createDemoAdapter() {
     { offset: 0, label: "6:00 pm FIT2109 Workshop 01" },
     { offset: 1, label: "10:00 am FIT2014 Seminar 01-P2" },
     { offset: 1, label: "2:00 pm FIT2014 Applied 01" },
-    { offset: 1, label: "4:00 pm FIT2102 Workshop 01" }
+    { offset: 1, label: "4:00 pm FIT2102 Workshop 01" },
+    { offset: 3, label: "3:00 pm FIT2102 Tutorial 07" },
+    { offset: 4, label: "10:00 am FIT2109 Tutorial 03" },
+    { offset: 0, label: "1:00 pm FIT2102 PASS 01" }
   ];
   const courses = [];
   for (const weekOffset of [-7, 0, 7]) {
@@ -20,7 +23,7 @@ export function createDemoAdapter() {
     }
   }
   const schedule = {
-    account: "demo", semester: { start: iso(monday - 49 * day), end: iso(monday + 41 * day) },
+    account: "demo", overallRate: 79, semester: { start: iso(monday - 49 * day), end: iso(monday + 41 * day) },
     days: Array.from({ length: 16 }, (_, index) => ({ value: iso(monday + (index - 7) * day), label: iso(monday + (index - 7) * day) })),
     selectedDay: iso(today.getTime()), courses
   };
@@ -28,7 +31,7 @@ export function createDemoAdapter() {
     async connect() { return schedule; },
     async submit(course, code) {
       await new Promise(resolve => setTimeout(resolve, 500));
-      if (code.toLowerCase() === "error") return { status: "unavailable", uncertain: false,
+      if (code.toLowerCase() === "error") return { status: "unavailable", uncertain: false, retryable: true,
         text: "【模拟网页反馈】Invalid attendance code.\n签到码无效。" };
       if (code.toLowerCase() === "unknown") return { status: "pending", uncertain: true,
         text: "【模拟网页反馈】连接中断，无法确认是否提交成功。" };

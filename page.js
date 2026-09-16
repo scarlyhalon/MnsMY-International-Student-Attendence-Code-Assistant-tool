@@ -21,7 +21,19 @@ export function readSchedule() {
     const icon = anchor.querySelector("img")?.getAttribute("src")?.split("/").pop()?.split(/[?#]/)[0] || "";
     courses.push({ url: url.href, day: url.searchParams.get("d"),
       label: anchor.textContent.replace(/\s+/g, " ").trim(), icon,
-      status: icon.toLowerCase() === "question.png" ? "pending" : "unknown" });
+      status: icon.toLowerCase() === "tick.png" ? "success" : icon.toLowerCase() === "question.png" ? "pending" : "unknown" });
+  }
+  // Completed and future sessions are static list items, not links.
+  for (const panel of document.querySelectorAll('.dayPanel[id^="dayPanel_"]')) {
+    const day = panel.id.slice("dayPanel_".length);
+    if (!days.some(item => item.value === day)) continue;
+    for (const item of panel.querySelectorAll("li")) {
+      if (item.querySelector('a[href*="Entry.aspx"]')) continue;
+      const label = item.textContent.replace(/\s+/g, " ").trim();
+      if (!/\b[A-Z]{2,6}\d{4}\b/i.test(label)) continue;
+      const icon = item.querySelector("img")?.getAttribute("src")?.split("/").pop()?.split(/[?#]/)[0] || "";
+      courses.push({ day, label, icon, status: icon.toLowerCase() === "tick.png" ? "success" : "pending" });
+    }
   }
   const account = document.getElementById("ctl00_ContentPlaceHolder1_userName")?.textContent.trim() || "";
   return { days, courses, selectedDay: select.value, account };
@@ -49,7 +61,7 @@ export function classifyAttendanceResult(text) {
   const statements = String(text || "").split(/[\r\n.!]+/).map(line => line.replace(/\s+/g, " ").trim()).filter(Boolean);
   const instructions = /\b(if|when|once|please|ensure|will|would|should|must|may|might|whether|how)\b/i;
   const negative = /\b(not|never|no|cannot|unable|failed|unsuccessful(?:ly)?|\w+n['’]t)\b/i;
-  const failure = /^(?:invalid|incorrect|expired|closed|unavailable)$|\b(?:invalid|incorrect|expired)\b.*\b(?:code|attendance|session)\b|\b(?:code|attendance|session)\b.*\b(?:invalid|incorrect|expired|closed|failed|unavailable)\b|\btoo late\b|\b(?:error|failed|failure)\b|\b(?:not|never)\b.*\b(?:recorded|registered|marked|valid)\b|\b(?:unable|cannot|couldn['’]t|wasn['’]t|hasn['’]t)\b.*\b(?:record|register|mark|recorded|registered|marked)\b/i;
+  const failure = /^(?:invalid|incorrect|expired|closed|unavailable)$|\b(?:invalid|incorrect|wrong|expired)\b.*\b(?:code|attendance|session)\b|\b(?:code|attendance|session)\b.*\b(?:invalid|incorrect|expired|closed|failed|unavailable)\b|\btoo late\b|\b(?:error|failed|failure)\b|\b(?:not|never)\b.*\b(?:recorded|registered|marked|valid)\b|\b(?:unable|cannot|couldn['’]t|wasn['’]t|hasn['’]t)\b.*\b(?:record|register|mark|recorded|registered|marked)\b/i;
   const affirmative = /^(?:(?:your|the)\s+)?attendance\s+(?:(?:has\s+(?:already\s+)?been|is|was)\s+)?(?:(?:already|successfully)\s+)?(?:recorded|registered|marked)(?:\s+(?:successfully|as present))?(?:\s+(?:for|on|at)\s+[^?]+)?$|^you have (?:successfully |already )?(?:recorded|registered|marked) your attendance(?: successfully)?$|^attendance (?:registration|recording) (?:was |is )?successful$/i;
   const feedback = statements.filter(line => !line.includes("?") && !instructions.test(line));
   if (feedback.some(line => failure.test(line))) return "unavailable";
@@ -101,10 +113,17 @@ export function submitAttendance({ expectedUrl, code, deadline }) {
   const beforeText = document.body.innerText;
   if (cutoff !== undefined && Date.now() >= cutoff) return { submitted: false, reason: "已超过7天签到期限。" };
   button.click();
-  return { submitted: true, beforeText };
+  return { submitted: true, beforeText, documentId: globalThis.performance?.timeOrigin };
 }
 
 export function readPageResult() {
-  return { url: location.href, text: document.body.innerText,
+  return { url: location.href, text: document.body.innerText, documentId: globalThis.performance?.timeOrigin,
+    hasForm: Boolean(document.getElementById("ctl00_ContentPlaceHolder1_sessionCode")),
     ready: document.readyState === "complete" };
+}
+
+export function readOverallRate() {
+  const text = document.getElementById("ctl00_ContentPlaceHolder1_attendanceInfoBox")?.textContent || "";
+  const match = text.match(/(\d+(?:\.\d+)?)\s*%/);
+  return match && Number(match[1]) <= 100 ? Number(match[1]) : null;
 }

@@ -33,21 +33,26 @@ function pageFixture({ url = ENTRY, valid = true, inputPresent = true, formPrese
   let anchors = [];
   let period = null;
   let account = null;
+  let panels = [];
+  let rate = null;
   const document = {
     getElementById(id) {
+      if (id === "ctl00_ContentPlaceHolder1_attendanceInfoBox") return rate;
       if (id === "daySel") return select;
       if (id === "ctl00_ContentPlaceHolder1_periodBox") return period;
       if (id === "ctl00_ContentPlaceHolder1_userName") return account;
       return id === "ctl00_ContentPlaceHolder1_sessionCode" && inputPresent ? input : null;
     },
-    querySelectorAll() { return anchors; },
+    querySelectorAll(selector) { return selector.startsWith('.dayPanel') ? panels : anchors; },
     body: { innerText: "Original entry form" },
     readyState: "complete"
   };
   class Clock extends Date { static now() { return now(); } }
   const context = vm.createContext({ document, location: { href: url }, URL, HTMLInputElement: Input, Event, Date: Clock });
-  vm.runInContext(pageSource.replaceAll("export function", "function") + "\nthis.api = { readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult };", context);
+  vm.runInContext(pageSource.replaceAll("export function", "function") + "\nthis.api = { readOverallRate, readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult };", context);
   return { ...context.api, calls, input, button, document,
+    panels(value) { panels = value; },
+    rate(text) { rate = { textContent: text }; },
     period(text) { period = { textContent: text }; },
     account(text) { account = { textContent: text }; },
     schedule(days, links) {
@@ -86,7 +91,7 @@ test("schedule returns null when no course page is present", () => {
   assert.equal(pageFixture().readSchedule(), null);
 });
 
-test("schedule preserves observed school day strings and exposes icons without inferring success", () => {
+test("schedule preserves observed school day strings and recognizes observed official tick icons", () => {
   const page = pageFixture({ url: `${HOME}Units.aspx` });
   page.account(" Example Student ");
   page.schedule([{ value: "14_Sep_26", textContent: "14 September" }], [
@@ -99,7 +104,7 @@ test("schedule preserves observed school day strings and exposes icons without i
   assert.equal(result.courses[0].icon, "question.png");
   assert.equal(result.courses[0].status, "pending");
   assert.equal(result.courses[1].icon, "tick.png");
-  assert.equal(result.courses[1].status, "unknown");
+  assert.equal(result.courses[1].status, "success");
 });
 
 test("semester reads only the observed period element and rejects impossible or reversed ranges", () => {
@@ -212,7 +217,7 @@ test("in-page deadline is rechecked immediately before clicking", () => {
 
 function adapterFixture({ submitError = false, unchanged = false, submitted = true,
   beforeText = "Original entry form", resultText = "Invalid attendance code", now = Date.now,
-  onEntryReady = () => {} } = {}) {
+  onEntryReady = () => {}, completed = false, newDocument = false } = {}) {
   const calls = [];
   let current = { id: 1, windowId: 2, url: `${HOME}Units.aspx`, status: "complete" };
   let queuedTabs = [];
@@ -237,22 +242,23 @@ function adapterFixture({ submitError = false, unchanged = false, submitted = tr
     scripting: {
       async executeScript({ func, args }) {
         calls.push(["script", func.name, args]);
-        if (func.name === "readSchedule") return [{ result: SCHEDULE }];
+        if (func.name === "readOverallRate") return [{ result: 79 }];
+        if (func.name === "readSchedule") return [{ result: completed ? { ...SCHEDULE, courses: [{ ...COURSE, status: "success" }] } : SCHEDULE }];
         if (func.name === "readSemester") return [{ result: { start: "2026-07-27", end: "2026-10-23" } }];
         if (func.name === "submitAttendance") {
           assert.equal(current.url, ENTRY);
           assert.equal(current.status, "complete");
           if (submitError) throw new Error("document navigated");
-          return [{ result: { submitted, beforeText, reason: "网页课次与所选课程不一致" } }];
+          return [{ result: { submitted, beforeText, documentId: newDocument ? 1 : undefined, reason: "网页课次与所选课程不一致" } }];
         }
         resultReads++;
         const text = Array.isArray(resultText) ? resultText[Math.min(resultReads - 2, resultText.length - 1)] : resultText;
-        return [{ result: { url: ENTRY, ready: true, text: unchanged || resultReads === 1 ? beforeText : text } }];
+        return [{ result: { url: ENTRY, ready: true, documentId: newDocument ? 2 : undefined, text: unchanged || resultReads === 1 ? beforeText : text } }];
       }
     }
   };
   class Clock extends Date { static now() { return now(); } }
-  const context = vm.createContext({ chrome, URL, Date: Clock, readSchedule() {}, readSemester() {}, submitAttendance() {}, readPageResult() {},
+  const context = vm.createContext({ chrome, URL, Date: Clock, readOverallRate() {}, readSchedule() {}, readSemester() {}, submitAttendance() {}, readPageResult() {},
     classifyAttendanceResult: pageFixture().classifyAttendanceResult, setTimeout(fn) { queueMicrotask(fn); } });
   vm.runInContext(browserSource.replace(/^import.*\r?\n/, "").replace("export function", "function") + "\nthis.adapter = createBrowserAdapter();", context);
   return { adapter: context.adapter, calls, setCurrent(url) { current = { ...current, url, status: "complete" }; queuedTabs = []; } };
@@ -264,7 +270,7 @@ test("connect reads the semester and navigates to fresh Units on every request",
   assert.deepEqual(JSON.parse(JSON.stringify(result.semester)), { start: "2026-07-27", end: "2026-10-23" });
   await adapter.connect();
   assert.deepEqual(calls.filter(call => call[0] === "navigate").map(call => call[1]), [
-    `${HOME}AttendanceInfo.aspx`, `${HOME}Units.aspx`, `${HOME}AttendanceInfo.aspx`, `${HOME}Units.aspx`
+    HOME, `${HOME}AttendanceInfo.aspx`, `${HOME}Units.aspx`, HOME, `${HOME}AttendanceInfo.aspx`, `${HOME}Units.aspx`
   ]);
 });
 
@@ -304,7 +310,7 @@ test("adapter uses an already-loaded matching course without a same-document rel
 });
 
 test("interrupted submission stays uncertain and never retries automatically", async () => {
-  const { adapter, calls } = adapterFixture({ submitError: true });
+  const { adapter, calls } = adapterFixture({ submitError: true, resultText: "No confirmation available" });
   await adapter.connect();
   const response = await adapter.submit(COURSE, "1234");
   assert.equal(response.uncertain, true);
@@ -379,4 +385,44 @@ test("adapter checks time after navigation finishes", async () => {
   assert.equal(result.status, "unavailable");
   assert.match(result.text, /7天/);
   assert.equal(calls.filter(call => call[0] === "script" && call[1] === "submitAttendance").length, 0);
+});
+
+
+test("all day panels preserve completed and future static sessions", () => {
+  const page = pageFixture();
+  page.schedule([{ value: "17_Sep_26", textContent: "Thursday" }, { value: "18_Sep_26", textContent: "Friday" }], []);
+  page.panels([...["17_Sep_26", "18_Sep_26"].map((day, index) => ({ id: `dayPanel_${day}`,
+    querySelectorAll() { return [{ textContent: "3:00 pm FIT2102 Tutorial 07",
+      querySelector(selector) { return selector === "img" ? { getAttribute() { return index ? "./img/question.png" : "./img/tick.png"; } } : null; }
+    }]; }
+  }))]);
+  const result = page.readSchedule();
+  assert.equal(result.courses.length, 2);
+  assert.equal(result.courses[0].status, "success");
+  assert.equal(result.courses[1].day, "18_Sep_26");
+  assert.equal(result.courses[1].url, undefined);
+});
+
+test("overall rate reads only the official homepage summary", () => {
+  const page = pageFixture();
+  assert.equal(page.readOverallRate(), null);
+  page.rate("Overall attendance rate: 79.5% (Semester 2, 2026)");
+  assert.equal(page.readOverallRate(), 79.5);
+  page.rate("Overall attendance rate: unavailable");
+  assert.equal(page.readOverallRate(), null);
+});
+
+test("official completed session resolves unrecognized feedback without a second submission", async () => {
+  const { adapter, calls } = adapterFixture({ resultText: "Thank you", completed: true });
+  await adapter.connect();
+  assert.equal((await adapter.submit(COURSE, "1234")).status, "success");
+  assert.equal(calls.filter(call => call[1] === "submitAttendance").length, 1);
+});
+
+test("incorrect code feedback allows correction, including the same error after a new response document", async () => {
+  const { adapter } = adapterFixture({ beforeText: "Invalid attendance code", resultText: "Invalid attendance code", newDocument: true });
+  await adapter.connect();
+  const result = await adapter.submit(COURSE, "wrong");
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.retryable, true);
 });
