@@ -1,5 +1,5 @@
 其实已经看到了许多前人的优秀成果，但还是想要自己尝试一下，本人代码能力稀烂，没有足够的功底，但胜在愿意试试。花费了一些Token用Codex生成了一个目前还算能用的小工具。本工具避免了繁琐的工序，配置本地环境或为电脑添加任何工具，就是一个简简单单的浏览器插件，直接就能使用。
-压缩包下载链接: (https://1drv.ms/u/c/a1666337418f6ef9/IQBVIDx2aiXORp5ik6AmsjssAdT59LEQjfK9mqLxBnPaOtw?e=SZeE4h)
+压缩包下载链接: (https://1drv.ms/u/c/a1666337418f6ef9/IQBzq85nKHAfR5i2tLxR4fUsAWovn6-7ir_DO81BVpgJSfo?e=dh8Nc5)
 
 #以下由AI生成
 # 签到助手 v0.3
