@@ -4,7 +4,7 @@ import path from 'node:path';
 const folder = path.resolve(import.meta.dirname, '..');
 const read = name => fs.readFileSync(path.join(folder, name), 'utf8');
 const manifest = JSON.parse(read('manifest.json'));
-if (manifest.manifest_version !== 3 || manifest.version !== '0.3.1') throw new Error('Unexpected manifest');
+if (manifest.manifest_version !== 3 || manifest.version !== '0.3.2') throw new Error('Unexpected manifest');
 for (const file of ['background.js', 'app.html', 'app.css', 'app.js', 'browser.js', 'page.js', 'weeks.js', 'store.js', 'demo.js']) {
   if (!fs.existsSync(path.join(folder, file))) throw new Error(`Missing ${file}`);
 }

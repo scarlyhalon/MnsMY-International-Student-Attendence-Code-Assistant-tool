@@ -69,9 +69,12 @@ export function classifyAttendanceResult(text) {
   return "pending";
 }
 
-export function submitAttendance({ expectedUrl, code, deadline, expectedAccount }) {
+export function submitAttendance({ expectedUrl, code, deadline, expectedAccount, verifiedAccount }) {
+  // Entry.aspx has no username element. In that case require the adapter's
+  // fresh server-side account check; an explicit conflicting name still blocks.
+  const pageAccount = document.getElementById("ctl00_ContentPlaceHolder1_userName")?.textContent.trim();
   if (expectedAccount !== undefined && (!expectedAccount ||
-      document.getElementById("ctl00_ContentPlaceHolder1_userName")?.textContent.trim() !== expectedAccount)) {
+      (pageAccount ? pageAccount !== expectedAccount : verifiedAccount !== expectedAccount))) {
     return { submitted: false, accountChanged: true, reason: "账户已变化或无法核实，请重新连接。" };
   }
   const current = new URL(location.href);

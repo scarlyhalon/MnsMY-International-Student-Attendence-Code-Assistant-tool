@@ -93,7 +93,7 @@ export function createBrowserAdapter() {
       } catch { return accountFailure(); }
       let response;
       try {
-        response = await run(submitAttendance, [{ expectedUrl: course.url, code, deadline: course.deadline, expectedAccount: connectedAccount }]);
+        response = await run(submitAttendance, [{ expectedUrl: course.url, code, deadline: course.deadline, expectedAccount: connectedAccount, verifiedAccount: expectedAccount }]);
       } catch {
         // Navigation may interrupt the response after a click. Never retry automatically.
         response = { submitted: true, beforeText: "", interrupted: true };
@@ -109,7 +109,12 @@ export function createBrowserAdapter() {
         await pause(250);
         try {
           const page = await run(readPageResult);
-          if (page?.ready && page.account !== connectedAccount) return accountFailure();
+          if (page?.ready) {
+            if (!page.url?.startsWith(HOME)) return accountFailure();
+            // Result/entry pages can omit the name even while logged in.
+            const account = page.account || await run(readSessionAccount);
+            if (account !== connectedAccount) return accountFailure();
+          }
           if (page?.ready && new URL(page.url).pathname === "/student/Units.aspx") break;
           if (page?.ready && (page.url !== course.url || page.text !== response.beforeText || (page.documentId && response.documentId && page.documentId !== response.documentId))) {
             const freshText = page.documentId && response.documentId && page.documentId !== response.documentId ? page.text : page.text.split(/\r?\n/)

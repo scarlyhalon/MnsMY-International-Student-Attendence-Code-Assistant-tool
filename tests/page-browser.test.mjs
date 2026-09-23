@@ -217,7 +217,7 @@ test("in-page deadline is rechecked immediately before clicking", () => {
 
 function adapterFixture({ submitError = false, unchanged = false, submitted = true,
   beforeText = "Original entry form", resultText = "Invalid attendance code", now = Date.now,
-  onEntryReady = () => {}, completed = false, newDocument = false, sessionAccount = () => "Example Student" } = {}) {
+  onEntryReady = () => {}, completed = false, newDocument = false, sessionAccount = () => "Example Student", resultAccount = "Example Student" } = {}) {
   const calls = [];
   let current = { id: 1, windowId: 2, url: `${HOME}Units.aspx`, status: "complete" };
   let queuedTabs = [];
@@ -254,7 +254,7 @@ function adapterFixture({ submitError = false, unchanged = false, submitted = tr
         }
         resultReads++;
         const text = Array.isArray(resultText) ? resultText[Math.min(resultReads - 2, resultText.length - 1)] : resultText;
-        return [{ result: { url: ENTRY, ready: true, account: "Example Student", documentId: newDocument ? 2 : undefined, text: unchanged || resultReads === 1 ? beforeText : text } }];
+        return [{ result: { url: ENTRY, ready: true, account: resultAccount, documentId: newDocument ? 2 : undefined, text: unchanged || resultReads === 1 ? beforeText : text } }];
       }
     }
   };
@@ -465,4 +465,40 @@ test("matching account permits the original form submission", () => {
   const result = page.submitAttendance({ expectedUrl: ENTRY, code: "1234", expectedAccount: "Example Student" });
   assert.equal(result.submitted, true);
   assert.equal(page.calls.filter(call => call[0] === "click").length, 1);
+});
+
+
+test("real Entry layout without username submits after a fresh account verification", () => {
+  const page = pageFixture();
+  const result = page.submitAttendance({ expectedUrl: ENTRY, code: "test-code",
+    expectedAccount: "Example Student", verifiedAccount: "Example Student" });
+  assert.equal(result.submitted, true);
+  assert.equal(page.calls.filter(call => call[0] === "click").length, 1);
+});
+
+test("fresh verification does not override an explicit conflicting page name", () => {
+  const page = pageFixture();
+  page.account("Different Student");
+  const result = page.submitAttendance({ expectedUrl: ENTRY, code: "test-code",
+    expectedAccount: "Example Student", verifiedAccount: "Example Student" });
+  assert.equal(result.accountChanged, true);
+  assert.equal(page.calls.length, 0);
+});
+
+test("nameless result pages use fresh account verification for success and code errors", async () => {
+  for (const [resultText, status] of [["Attendance successfully recorded.", "success"], ["Invalid attendance code", "unavailable"]]) {
+    const { adapter } = adapterFixture({ resultAccount: "", resultText });
+    await adapter.connect();
+    const result = await adapter.submit(COURSE, "test-code");
+    assert.equal(result.status, status);
+    assert.equal(result.accountChanged, undefined);
+  }
+});
+
+test("nameless result still blocks an account change after the click", async () => {
+  let checks = 0;
+  const { adapter } = adapterFixture({ resultAccount: "", sessionAccount: () => ++checks <= 3 ? "Example Student" : "Different Student" });
+  await adapter.connect();
+  const result = await adapter.submit(COURSE, "test-code");
+  assert.equal(result.accountChanged, true);
 });
