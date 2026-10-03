@@ -18,12 +18,14 @@ files = [
     "app.html",
     "app.css",
     "app.js",
+    "i18n.js",
     "browser.js",
     "page.js",
     "weeks.js",
     "store.js",
     "demo.js",
     "README.md",
+    "README.en.md",
 ]
 
 output = root / "dist" / "attendance-helper.zip"

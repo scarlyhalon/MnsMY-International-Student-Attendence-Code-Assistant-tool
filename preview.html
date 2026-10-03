@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -231,6 +231,15 @@ input:disabled, select:disabled { color: #919daf; background: #f9fafc; border-co
 [data-state="correction"] > .status-icon { background: #fff0d8; color: #a45d0b; }
 .week-state[data-state="correction"], .course-state[data-state="correction"] { color: #a45d0b; }
 
+.header-actions { display: flex; align-items: center; gap: 12px; }
+#language-toggle { white-space: nowrap; padding: 8px 12px; }
+.course-state, .week-state { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .app-header { flex-wrap: wrap; gap: 12px; padding: 15px 0; }
+  .header-actions { margin-left: auto; }
+  .settings-caption { text-align: right; }
+}
+
 </style>
     
   </head>
@@ -239,9 +248,10 @@ input:disabled, select:disabled { color: #919daf; background: #f9fafc; border-co
       <header class="app-header">
         <div class="brand">
           <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5.5" width="16" height="15" rx="4" stroke="currentColor" stroke-width="1.7"/><path d="M8 3.5v4M16 3.5v4M4.5 10h15M9 15l2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <div><span class="brand-name">签到助手</span><span class="brand-caption">个人工具 · v0.3.3</span></div>
+          <div><span class="brand-name">签到助手</span><span class="brand-caption">个人工具 · v0.3.4</span></div>
         </div>
-        <button class="button button-text" id="open-site" type="button">打开学校网页 <span aria-hidden="true">↗</span></button>
+        <div class="header-actions"><button class="button button-secondary" id="language-toggle" type="button" aria-label="Switch to Chinese">中文</button>
+        <button class="button button-text" id="open-site" type="button">打开学校网页 <span aria-hidden="true">↗</span></button></div>
       </header>
 
       <div class="demo-banner" id="demo-banner" hidden><span class="demo-dot" aria-hidden="true"></span>交互预览 · 使用模拟课程，不会提交真实签到</div>
@@ -286,6 +296,210 @@ input:disabled, select:disabled { color: #919daf; background: #f9fafc; border-co
     </div>
   <script>
 (async () => {
+// Translate only extension-owned messages; school feedback and course names stay intact.
+const english = {
+  "签到助手 · 学期视图": "Attendance Helper · Semester",
+  "签到助手": "Attendance Helper",
+  "打开学校网页": "Open school website",
+  "交互预览 · 使用模拟课程，不会提交真实签到": "Interactive preview · Sample classes only; no real attendance submissions",
+  "学期签到": "Semester attendance",
+  "按周查看课次，填好签到码后统一提交。": "View weekly classes and submit all entered attendance codes.",
+  "今天": "Today",
+  "学校网页连接": "School website connection",
+  "学校签到网页": "School attendance website",
+  "请先在学校网页登录你的账户": "Sign in to your school account on the school website first",
+  "刷新课程": "Refresh classes",
+  "连接签到网页": "Connect to school website",
+  "总签到率": "Overall attendance",
+  "官方总签到率": "Official overall attendance",
+  "暂未读取": "Not loaded",
+  "如果已经无法提交请联系": "If submissions are closed, contact",
+  "PASS 课程需要签到（默认关闭）": "Include PASS classes (off by default)",
+  "学期设置": "Semester settings",
+  "定义教学周与期中假期": "Teaching weeks and mid-semester break",
+  "Week 1 起始日期": "Week 1 start date",
+  "填写第一教学周的第一天。": "The first day of your first teaching week.",
+  "教学周数": "Teaching weeks",
+  "周": "weeks",
+  "不包含期中假期。": "Excludes the mid-semester break.",
+  "期中假期开始": "Mid-semester break starts",
+  "可选": "Optional",
+  "从这天起休息 7 天，不计入教学周。": "A 7-day break, excluded from teaching weeks.",
+  "保存学期设置": "Save semester settings",
+  "先连接学校签到网页": "Connect to the school website first",
+  "登录学校账户后，点击「连接签到网页」载入课程和签到状态。": "Sign in, then click “Connect to school website” to load classes and attendance.",
+  "每周课程": "Weekly classes",
+  "展开教学周，查看固定课表与每节课的签到状态。": "Expand a week to view classes and attendance status.",
+  "签到状态说明": "Attendance status legend",
+  "待处理 / 未开放": "Pending / Not open",
+  "签到码需要修正": "Code needs correction",
+  "不可签到 / 失败": "Unavailable / Failed",
+  "全部完成": "All completed",
+  "无课次": "No classes",
+  "尚未填写签到码": "No codes entered",
+  "只提交你已填写的课次，点击按钮后开始。": "Only classes with entered codes will be submitted when you click.",
+  "提交已填写的签到码": "Submit entered codes",
+  "个人辅助工具 · 非学校官方扩展": "Personal helper · Not an official university extension",
+  "不保存签到码或学校密码 · 结果以学校系统记录为准": "Codes and passwords are not saved · School records are authoritative",
+  "请先连接学校账户，再保存该账户的学期设置。": "Connect to your school account before saving its semester settings.",
+  "已填写 {0} 节课的签到码": "Codes entered for {0} classes",
+  "正在逐节提交…": "Submitting classes…",
+  "提交已填写的签到码 ({0})": "Submit entered codes ({0})",
+  "请设置学期开始日期，再生成每周课表。": "Set the semester start date to generate weekly classes.",
+  "连接学校签到网页后，这里会按教学周显示固定课表。": "Connect to the school website to display your weekly timetable here.",
+  "等待连接课表": "Waiting for timetable connection",
+  "请检查学期设置": "Check semester settings",
+  "{0} 个教学周 · 每周 {1} 节课 · {2} 节可填写": "{0} teaching weeks · {1} classes per week · {2} available for entry",
+  "学校日期范围：{0} — {1}。签到截止：下一周同一天、同一上课时间（马来西亚时间）。{2}": "School date range: {0} — {1}. Deadline: the same class start time next week (Malaysia time).{2}",
+  " Mid break：从 {0} 起 7 天，不计入教学周。": " Mid-semester break: 7 days from {0}, excluded from teaching weeks.",
+  "尚未读取到学校开放的日期范围。": "The school's available date range has not been loaded.",
+  "历史记录未读取": "History not loaded",
+  "部分课次无法签到": "Some classes unavailable",
+  "无法签到": "Unavailable",
+  "有签到码需要修正": "Attendance codes need correction",
+  "未开放": "Not open yet",
+  "无须签到": "No attendance required",
+  "待完成 · {0}/{1}": "Pending · {0}/{1}",
+  "尚未保存这一周的课程记录。": "No class records saved for this week yet.",
+  "日期 / 时间": "Date / Time",
+  "课程": "Unit",
+  "类型 / 编号": "Type / Group",
+  "签到码": "Attendance code",
+  "状态": "Status",
+  "时间见学校网页": "See school website for time",
+  "截止 {0}": "Deadline {0}",
+  "{0} 签到码": "{0} attendance code",
+  "已完成": "Completed",
+  "输入签到码": "Enter code",
+  "暂不可填写": "Entry unavailable",
+  "填写老师提供的签到码": "Enter the code provided by your teacher",
+  "已签到": "Attendance recorded",
+  "待签到": "Pending attendance",
+  "正在连接": "Connecting",
+  "正在读取学期日期、课程时间和当前签到入口…": "Loading semester dates, class times and attendance entries…",
+  "模拟课堂": "Sample classes",
+  "已连接 · {0}": "Connected · {0}",
+  "已连接学校网页": "Connected to school website",
+  "交互预览已就绪": "Interactive preview ready",
+  "固定课表已读取": "Timetable loaded",
+  "可填写的课次输入任意码可演示成功；error 演示失败，unknown 演示结果不明确，队列继续处理其他课程。": "Enter any code in an available class to simulate success; error simulates an invalid code and unknown an unconfirmed result. Other classes continue.",
+  "展开教学周，在课程右侧填写签到码，最后统一提交。请设置 Mid break 的开始日期。": "Expand a week, enter your codes and submit them together. Set your mid-semester break start date if applicable.",
+  "尚未连接": "Not connected",
+  "需要连接学校网页": "School website connection required",
+  "学期设置已保存": "Semester settings saved",
+  "每周课程已重新排列。Mid break 跳过一周，签到期限仍按 7 个日历日计算。": "Weekly classes updated. The break skips one teaching week; attendance deadlines remain 7 calendar days.",
+  "正在提交 {0}/{1}": "Submitting {0}/{1}",
+  "正在提交": "Submitting",
+  "[签到码已隐藏]": "[Attendance code hidden]",
+  "已确认成功": "Success confirmed",
+  "签到码错误，需要修正": "Incorrect code; correction needed",
+  "提交失败或无法签到": "Submission failed or unavailable",
+  "结果待确认": "Result unconfirmed",
+  "记录保存失败：{0}": "Could not save records: {0}",
+  "账户已变化或无法核实": "Account changed or could not be verified",
+  "已停止提交，请重新连接": "Submission stopped; reconnect",
+  "学校登录账户已变化或无法核实。剩余课次未提交，已清空输入的签到码。": "The school account changed or could not be verified. Remaining classes were not submitted and entered codes were cleared.",
+  "账户已变化": "Account changed",
+  "请重新连接": "Please reconnect",
+  "学校账户已切换，请重新连接以载入对应设置和记录。": "The school account changed. Reconnect to load its settings and records.",
+  "批量处理完成，部分结果待确认": "Batch completed; some results need checking",
+  "本次提交已处理": "Submission processed",
+  "部分课次结果无法确认，请打开学校网页检查。其他已填写课次已继续处理；待确认课次没有重复提交。": "Some results could not be confirmed. Check the school website. Other entered classes were processed; unconfirmed classes were not resubmitted.",
+  "已处理 {0} 节课，请查看逐节结果。签到码错误的课次可直接修改后再次提交。": "Processed {0} classes. Check each result. You can correct invalid codes and submit those classes again.",
+  "无法打开网页": "Could not open website",
+  "请手动打开学校签到网站。": "Please open the school attendance website manually.",
+  "准备开始": "Ready to start",
+  "先在学校网页登录，再连接课表并设置学期日期。": "Sign in on the school website, then connect your timetable and set semester dates.",
+  "未命名课程": "Unnamed class",
+  "请选择有效的学期开始日期。": "Choose a valid semester start date.",
+  "教学周数必须是 1 至 52 之间的整数。": "Teaching weeks must be a whole number from 1 to 52.",
+  "请选择有效的 Mid break 开始日期。": "Choose a valid mid-semester break start date.",
+  "Mid break 必须从学期开始日至最后一个教学周之间开始。": "The break must start between the semester start and the last teaching week.",
+  "当前时间无效，请重新打开签到助手。": "Invalid current time. Reopen Attendance Helper.",
+  "待填写签到码": "Awaiting code",
+  "尚未读取可签到日期": "Available attendance dates not loaded",
+  "已关闭": "Closed",
+  "无签到入口": "No attendance entry",
+  "提交失败 / 无法签到": "Failed / Unavailable",
+  "已提交，待确认": "Submitted; awaiting confirmation",
+  "已超过7天签到期限": "7-day attendance deadline passed",
+  "未到上课时间": "Class has not started",
+  "PASS 不计入辅助签到": "PASS excluded from assisted attendance",
+  "签到码错误，请修改后重试": "Incorrect code; edit and try again",
+  "学校账户已变化或无法核实，请重新连接。": "The school account changed or could not be verified. Please reconnect.",
+  "请先在学校网页完成登录，然后回到这里重新连接。": "Sign in on the school website, then return here and reconnect.",
+  "学校网页加载超时，请检查页面后重新连接。": "The school website timed out. Check the page and reconnect.",
+  "已打开学校网页。请完成登录，再回到这里点击“连接签到网页”。": "The school website is open. Sign in, then return here and click “Connect to school website”.",
+  "无法核实学校账户，请重新登录后连接。": "Could not verify your school account. Sign in again and reconnect.",
+  "未读取到课程列表，请检查学校网页是否已登录或是否变更了页面。": "Could not read the class list. Check that you are signed in; the school page may have changed.",
+  "连接期间账户已变化，或无法读取学期，请重新连接。": "The account changed during connection, or the semester could not be read. Please reconnect.",
+  "请先连接签到网页。": "Connect to the attendance website first.",
+  "所选课次链接无效，请刷新课程后重试。": "Invalid class link. Refresh classes and try again.",
+  "请先输入老师提供的签到码。": "Enter the attendance code provided by your teacher first.",
+  "签到期限无效，请刷新课程后重试。": "Invalid attendance deadline. Refresh classes and try again.",
+  "已超过7天签到期限。": "The 7-day attendance deadline has passed.",
+  "表单未提交，请检查学校网页。": "The form was not submitted. Check the school website.",
+  "暂未收到提交操作的反馈，请检查学校网页，避免重复提交。": "No submission feedback received. Check the school website before submitting again.",
+  "学校课程列表已标记签到成功。": "The school class list confirms attendance was recorded.",
+  "已执行一次提交，但暂未读取到新的网页反馈。请打开学校网页核对结果。": "Submitted once, but no new feedback was detected. Check the result on the school website.",
+  "账户已变化或无法核实，请重新连接。": "The account changed or could not be verified. Please reconnect.",
+  "网页课次与所选课程不一致，请刷新课程后重试。": "The website class does not match your selection. Refresh classes and try again.",
+  "未找到可用的签到表单，请在学校网页检查登录和课次。": "No available attendance form found. Check your login and class on the school website.",
+  "签到码未通过网页表单校验，请在学校网页检查。": "The code did not pass the website's form validation. Check the school website.",
+  "【模拟网页反馈】Invalid attendance code.": "[Simulated feedback] Invalid attendance code.",
+  "签到码无效。": "Invalid attendance code.",
+  "【模拟网页反馈】连接中断，无法确认是否提交成功。": "[Simulated feedback] Connection interrupted; submission could not be confirmed.",
+  "【模拟网页反馈】Attendance recorded successfully.": "[Simulated feedback] Attendance recorded successfully.",
+  "这是演示，没有发送真实签到请求。": "This is a demo. No real attendance request was sent.",
+  "个人工具 · v0.3.4": "Personal tool · v0.3.4"
+};
+let language = "en";
+function getLanguage() { return language; }
+function setLanguage(value) { language = value === "zh-CN" ? "zh-CN" : "en"; }
+const patterns = Object.entries(english).filter(([key]) => key.includes("{0}")).map(([key, value]) => {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [new RegExp("^" + escaped.replace(/\\\{\d+\\\}/g, "(.*?)") + "$"), value];
+});
+function t(text) {
+  if (typeof text !== "string" || language === "zh-CN") return text;
+  if (Object.hasOwn(english, text)) return english[text];
+  for (const [pattern, value] of patterns) {
+    const match = pattern.exec(text);
+    if (match) return value.replace(/\{(\d+)\}/g, (_, index) => t(match[Number(index) + 1]));
+  }
+  if (text.includes("\n")) return text.split("\n").map(t).join("\n");
+  return text;
+}
+async function loadLanguage(storage) {
+  try { setLanguage((await storage.get("language")).language); }
+  catch { setLanguage("en"); }
+  return language;
+}
+async function saveLanguage(storage, value) {
+  await storage.set({ language: value });
+  setLanguage(value);
+}
+// Capture static text once, so switching back restores the original Chinese text.
+function staticTranslations(root) {
+  const entries = [];
+  const walk = node => {
+    if (node.nodeType === 3 && /[\u3400-\u9fff]/.test(node.textContent)) {
+      const raw = node.textContent;
+      entries.push(() => { node.textContent = raw.replace(raw.trim(), t(raw.trim())); });
+    }
+    if (node.nodeType === 1) {
+      if (["SCRIPT", "STYLE"].includes(node.tagName)) return;
+      for (const name of ["aria-label", "title"]) {
+        const raw = node.getAttribute(name);
+        if (raw) entries.push(() => node.setAttribute(name, t(raw)));
+      }
+    }
+    for (const child of node.childNodes || []) walk(child);
+  };
+  walk(root);
+  return () => entries.forEach(apply => apply());
+}
+
 const DAY = 86400000;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
@@ -537,15 +751,34 @@ const $ = id => document.getElementById(id);
 const demo = true;
 const adapter = createDemoAdapter();
 const drafts = new Map(); // Attendance codes stay in this page's memory only.
-const recordStore = createRecordStore(demo ? {
+const storage = demo ? {
   async get(key) { return { [key]: JSON.parse(localStorage.getItem(key) || "null") }; },
   async set(values) { for (const [key, value] of Object.entries(values)) localStorage.setItem(key, JSON.stringify(value)); }
-} : chrome.storage.local);
+} : chrome.storage.local;
+const recordStore = createRecordStore(storage);
+await loadLanguage(storage);
+const applyStaticTranslations = staticTranslations(document.documentElement);
+const displayTexts = new Map();
+function setText(id, text) {
+  displayTexts.set(id, text);
+  $(id).textContent = t(text);
+}
+function appendText(id, text) { setText(id, (displayTexts.get(id) || "") + text); }
+function renderLanguage() {
+  document.documentElement.lang = getLanguage();
+  applyStaticTranslations();
+  for (const [id, text] of displayTexts) $(id).textContent = t(text);
+  setText("language-toggle", getLanguage() === "en" ? "中文" : "English");
+  $("language-toggle").setAttribute("aria-label", getLanguage() === "en" ? "Switch to Chinese" : "切换为英文");
+  $("today").textContent = new Intl.DateTimeFormat(getLanguage(), {
+    timeZone: "Asia/Kuala_Lumpur", month: "long", day: "numeric", weekday: "long"
+  }).format(new Date());
+}
 let settings = { startDate: "", weekCount: 12, breakStart: "", includePass: false };
 async function saveRecord() { if (schedule) await recordStore.save(recordKey(schedule), schedule, outcomes, settings); }
 function renderRate() {
   const rate = schedule?.overallRate;
-  $("overall-rate").textContent = typeof rate === "number" ? `${rate}%` : "暂未读取";
+  setText("overall-rate", typeof rate === "number" ? `${rate}%` : "暂未读取");
   $("overall-rate").style.color = typeof rate === "number" && rate < 80 ? "#c62828" : "";
   $("rate-help").hidden = !(typeof rate === "number" && rate < 80);
 }
@@ -555,19 +788,19 @@ let model = null;
 let busy = false;
 let rendered = false;
 const symbols = { correction: "!", pending: "?", unavailable: "×", success: "✓", empty: "–" };
-const dateLabel = date => new Intl.DateTimeFormat("zh-CN", {
+const dateLabel = date => new Intl.DateTimeFormat(getLanguage(), {
   timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short"
 }).format(new Date(`${date}T12:00:00Z`));
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = t(text);
   return node;
 }
 function status(title, text, state = "info") {
-  $("status-title").textContent = title;
-  $("status-text").textContent = text;
+  setText("status-title", title);
+  setText("status-text", text);
   $("status").dataset.state = state;
 }
 function setSettingsFields() {
@@ -585,6 +818,7 @@ function selectedRows() {
 }
 function updateControls() {
   $("connect").disabled = busy;
+  $("language-toggle").disabled = busy;
   $("refresh").disabled = busy || !schedule;
   $("save-settings").disabled = busy || !schedule;
   for (const id of ["start-date", "week-count", "break-start", "include-pass"]) $(id).disabled = busy || !schedule;
@@ -592,9 +826,9 @@ function updateControls() {
     input.disabled = busy || input.dataset.available !== "true";
   }
   const count = selectedRows().length;
-  $("submission-count").textContent = `已填写 ${count} 节课的签到码`;
+  setText("submission-count", `已填写 ${count} 节课的签到码`);
   $("submit-all").disabled = busy || !count;
-  $("submit-all").textContent = busy ? "正在逐节提交…" : `提交已填写的签到码${count ? ` (${count})` : ""}`;
+  setText("submit-all", busy ? "正在逐节提交…" : `提交已填写的签到码${count ? ` (${count})` : ""}`);
 }
 function stateBadge(state, text, className) {
   const badge = element("span", className);
@@ -608,7 +842,7 @@ function renderWeeks() {
   if (!settings.startDate || !schedule) {
     model = null;
     $("weeks").append(element("div", "empty-week", schedule ? "请设置学期开始日期，再生成每周课表。" : "连接学校签到网页后，这里会按教学周显示固定课表。"));
-    $("summary").textContent = "等待连接课表";
+    setText("summary", "等待连接课表");
     updateControls();
     return;
   }
@@ -622,10 +856,10 @@ function renderWeeks() {
   const allRows = model.weeks.flatMap(week => week.rows);
   const validKeys = new Set(allRows.filter(row => row.canSubmit).map(row => row.key));
   for (const key of drafts.keys()) if (!validKeys.has(key)) drafts.delete(key);
-  $("summary").textContent = `${model.weeks.length} 个教学周 · 每周 ${model.templateCount} 节课 · ${allRows.filter(row => row.canSubmit).length} 节可填写`;
-  $("range-note").textContent = model.range.start
+  setText("summary", `${model.weeks.length} 个教学周 · 每周 ${model.templateCount} 节课 · ${allRows.filter(row => row.canSubmit).length} 节可填写`);
+  setText("range-note", model.range.start
     ? `学校日期范围：${model.range.start} — ${model.range.end}。签到截止：下一周同一天、同一上课时间（马来西亚时间）。${settings.breakStart ? ` Mid break：从 ${settings.breakStart} 起 7 天，不计入教学周。` : ""}`
-    : "尚未读取到学校开放的日期范围。";
+    : "尚未读取到学校开放的日期范围。");
   let preferred = model.weeks.find(week => week.rows.some(row => row.canSubmit))?.number;
   if (!preferred) preferred = model.weeks.find(week => !week.isPast)?.number;
   for (const week of model.weeks) {
@@ -670,10 +904,10 @@ function renderWeeks() {
         input.spellcheck = false;
         input.dataset.key = row.key;
         input.dataset.available = String(row.canSubmit);
-        input.setAttribute("aria-label", `${row.date} ${row.time} ${row.unit} ${row.activity} 签到码`);
-        input.placeholder = row.status === "success" ? "已完成" : row.canSubmit ? "输入签到码" : row.reason || "暂不可填写";
+        input.setAttribute("aria-label", t(`${row.date} ${row.time} ${row.unit} ${row.activity} 签到码`));
+        input.placeholder = t(row.status === "success" ? "已完成" : row.canSubmit ? "输入签到码" : row.reason || "暂不可填写");
         input.value = drafts.get(row.key) || "";
-        input.title = row.reason || "填写老师提供的签到码";
+        input.title = t(row.reason || "填写老师提供的签到码");
         input.addEventListener("input", () => { drafts.set(row.key, input.value); updateControls(); });
         codeCell.append(input);
         const rowText = row.status === "success" ? "已签到" : row.reason || "待签到";
@@ -702,7 +936,7 @@ async function connect() {
       drafts.clear();
       rendered = false;
       settings = settingsForAccount(next, saved);
-      $("result-text").textContent = "";
+      setText("result-text", "");
     }
     setSettingsFields();
     outcomes = same ? outcomes : saved?.outcomes || {};
@@ -714,7 +948,7 @@ async function connect() {
       setSettingsFields();
       await saveSettings();
     }
-    $("account").textContent = demo ? "模拟课堂" : `已连接${next.account ? ` · ${next.account}` : "学校网页"}`;
+    setText("account", demo ? "模拟课堂" : `已连接${next.account ? ` · ${next.account}` : "学校网页"}`);
     status(demo ? "交互预览已就绪" : "固定课表已读取", demo
       ? "可填写的课次输入任意码可演示成功；error 演示失败，unknown 演示结果不明确，队列继续处理其他课程。"
       : "展开教学周，在课程右侧填写签到码，最后统一提交。请设置 Mid break 的开始日期。");
@@ -722,7 +956,7 @@ async function connect() {
     schedule = null;
     model = null;
     drafts.clear();
-    $("account").textContent = "尚未连接";
+    setText("account", "尚未连接");
     status("需要连接学校网页", error.message, "error");
   } finally { busy = false; renderWeeks(); }
 }
@@ -749,7 +983,7 @@ $("submit-all").addEventListener("click", async () => {
   busy = true;
   updateControls();
   $("result-text").hidden = false;
-  $("result-text").textContent = "";
+  setText("result-text", "");
   let done = 0;
   let hasUncertain = false;
   let accountChanged = false;
@@ -773,18 +1007,18 @@ $("submit-all").addEventListener("click", async () => {
       }
       outcomes[item.row.key] = { ...result, text: String(result.text || "").split(item.code).join("[签到码已隐藏]"), attempted: true };
       const label = result.status === "success" ? "已确认成功" : result.retryable && !result.uncertain ? "签到码错误，需要修正" : result.status === "unavailable" ? "提交失败或无法签到" : "结果待确认";
-      $("result-text").textContent += `${item.row.date} ${item.row.time} ${item.row.unit} ${item.row.activity}\n${label}\n${result.text}\n\n`;
+      appendText("result-text", `${item.row.date} ${item.row.time} ${item.row.unit} ${item.row.activity}\n${label}\n${result.text}\n\n`);
       done++;
       if (result.uncertain) hasUncertain = true;
     } catch (error) {
       outcomes[item.row.key] = { status: "pending", attempted: true, uncertain: true, text: error.message };
-      $("result-text").textContent += `${item.row.label}\n${error.message}\n\n`;
+      appendText("result-text", `${item.row.label}\n${error.message}\n\n`);
       hasUncertain = true;
     }
     drafts.delete(item.row.key);
     item.code = "";
     renderWeeks();
-    try { await saveRecord(); } catch (error) { $("result-text").textContent += `记录保存失败：${error.message}\n`; }
+    try { await saveRecord(); } catch (error) { appendText("result-text", `记录保存失败：${error.message}\n`); }
   }
   for (const item of batch) item.code = "";
   if (accountChanged) {
@@ -794,7 +1028,7 @@ $("submit-all").addEventListener("click", async () => {
     busy = false;
     renderRate();
     renderWeeks();
-    $("account").textContent = "账户已变化或无法核实";
+    setText("account", "账户已变化或无法核实");
     status("已停止提交，请重新连接", "学校登录账户已变化或无法核实。剩余课次未提交，已清空输入的签到码。", "warning");
     return;
   }
@@ -811,7 +1045,7 @@ $("submit-all").addEventListener("click", async () => {
       busy = false;
       renderRate();
       renderWeeks();
-      $("account").textContent = "账户已变化";
+      setText("account", "账户已变化");
       status("请重新连接", "学校账户已切换，请重新连接以载入对应设置和记录。", "warning");
       return;
     }
@@ -835,17 +1069,24 @@ $("open-site").addEventListener("click", async () => {
   try { await adapter.openSite(); }
   catch { status("无法打开网页", "请手动打开学校签到网站。", "error"); }
 });
+$("language-toggle").addEventListener("click", async () => {
+  if (busy) return;
+  const next = getLanguage() === "en" ? "zh-CN" : "en";
+  try { await saveLanguage(storage, next); }
+  catch { setLanguage(next); } // Still allow switching when local storage is unavailable.
+  renderLanguage();
+  renderWeeks();
+  renderRate();
+});
 $("demo-banner").hidden = !demo;
-$("today").textContent = new Intl.DateTimeFormat("zh-CN", {
-  timeZone: "Asia/Kuala_Lumpur", month: "long", day: "numeric", weekday: "long"
-}).format(new Date());
+renderLanguage();
 setSettingsFields();
 status("准备开始", "先在学校网页登录，再连接课表并设置学期日期。");
 renderWeeks();
 if (demo) await connect();
 setInterval(() => { if (!busy && model && !document.querySelector("input[data-key]:focus")) renderWeeks(); }, 30000);
 
-})().catch(error => { document.getElementById('status-title').textContent = '预览加载失败'; document.getElementById('status-text').textContent = error.message; });
+})().catch(error => { document.getElementById('status-title').textContent = 'Preview failed to load'; document.getElementById('status-text').textContent = error.message; });
 </script>
 </body>
 </html>

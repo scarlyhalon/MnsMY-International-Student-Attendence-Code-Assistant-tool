@@ -1,3 +1,4 @@
+import { t, getLanguage, setLanguage, loadLanguage, saveLanguage, staticTranslations } from "./i18n.js";
 import { createRecordStore, recordKey, mergeScan, settingsForAccount } from "./store.js";
 import { createBrowserAdapter } from "./browser.js";
 import { createDemoAdapter } from "./demo.js";
@@ -7,15 +8,34 @@ const $ = id => document.getElementById(id);
 const demo = location.protocol !== "chrome-extension:";
 const adapter = demo ? createDemoAdapter() : createBrowserAdapter();
 const drafts = new Map(); // Attendance codes stay in this page's memory only.
-const recordStore = createRecordStore(demo ? {
+const storage = demo ? {
   async get(key) { return { [key]: JSON.parse(localStorage.getItem(key) || "null") }; },
   async set(values) { for (const [key, value] of Object.entries(values)) localStorage.setItem(key, JSON.stringify(value)); }
-} : chrome.storage.local);
+} : chrome.storage.local;
+const recordStore = createRecordStore(storage);
+await loadLanguage(storage);
+const applyStaticTranslations = staticTranslations(document.documentElement);
+const displayTexts = new Map();
+function setText(id, text) {
+  displayTexts.set(id, text);
+  $(id).textContent = t(text);
+}
+function appendText(id, text) { setText(id, (displayTexts.get(id) || "") + text); }
+function renderLanguage() {
+  document.documentElement.lang = getLanguage();
+  applyStaticTranslations();
+  for (const [id, text] of displayTexts) $(id).textContent = t(text);
+  setText("language-toggle", getLanguage() === "en" ? "中文" : "English");
+  $("language-toggle").setAttribute("aria-label", getLanguage() === "en" ? "Switch to Chinese" : "切换为英文");
+  $("today").textContent = new Intl.DateTimeFormat(getLanguage(), {
+    timeZone: "Asia/Kuala_Lumpur", month: "long", day: "numeric", weekday: "long"
+  }).format(new Date());
+}
 let settings = { startDate: "", weekCount: 12, breakStart: "", includePass: false };
 async function saveRecord() { if (schedule) await recordStore.save(recordKey(schedule), schedule, outcomes, settings); }
 function renderRate() {
   const rate = schedule?.overallRate;
-  $("overall-rate").textContent = typeof rate === "number" ? `${rate}%` : "暂未读取";
+  setText("overall-rate", typeof rate === "number" ? `${rate}%` : "暂未读取");
   $("overall-rate").style.color = typeof rate === "number" && rate < 80 ? "#c62828" : "";
   $("rate-help").hidden = !(typeof rate === "number" && rate < 80);
 }
@@ -25,19 +45,19 @@ let model = null;
 let busy = false;
 let rendered = false;
 const symbols = { correction: "!", pending: "?", unavailable: "×", success: "✓", empty: "–" };
-const dateLabel = date => new Intl.DateTimeFormat("zh-CN", {
+const dateLabel = date => new Intl.DateTimeFormat(getLanguage(), {
   timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short"
 }).format(new Date(`${date}T12:00:00Z`));
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = t(text);
   return node;
 }
 function status(title, text, state = "info") {
-  $("status-title").textContent = title;
-  $("status-text").textContent = text;
+  setText("status-title", title);
+  setText("status-text", text);
   $("status").dataset.state = state;
 }
 function setSettingsFields() {
@@ -55,6 +75,7 @@ function selectedRows() {
 }
 function updateControls() {
   $("connect").disabled = busy;
+  $("language-toggle").disabled = busy;
   $("refresh").disabled = busy || !schedule;
   $("save-settings").disabled = busy || !schedule;
   for (const id of ["start-date", "week-count", "break-start", "include-pass"]) $(id).disabled = busy || !schedule;
@@ -62,9 +83,9 @@ function updateControls() {
     input.disabled = busy || input.dataset.available !== "true";
   }
   const count = selectedRows().length;
-  $("submission-count").textContent = `已填写 ${count} 节课的签到码`;
+  setText("submission-count", `已填写 ${count} 节课的签到码`);
   $("submit-all").disabled = busy || !count;
-  $("submit-all").textContent = busy ? "正在逐节提交…" : `提交已填写的签到码${count ? ` (${count})` : ""}`;
+  setText("submit-all", busy ? "正在逐节提交…" : `提交已填写的签到码${count ? ` (${count})` : ""}`);
 }
 function stateBadge(state, text, className) {
   const badge = element("span", className);
@@ -78,7 +99,7 @@ function renderWeeks() {
   if (!settings.startDate || !schedule) {
     model = null;
     $("weeks").append(element("div", "empty-week", schedule ? "请设置学期开始日期，再生成每周课表。" : "连接学校签到网页后，这里会按教学周显示固定课表。"));
-    $("summary").textContent = "等待连接课表";
+    setText("summary", "等待连接课表");
     updateControls();
     return;
   }
@@ -92,10 +113,10 @@ function renderWeeks() {
   const allRows = model.weeks.flatMap(week => week.rows);
   const validKeys = new Set(allRows.filter(row => row.canSubmit).map(row => row.key));
   for (const key of drafts.keys()) if (!validKeys.has(key)) drafts.delete(key);
-  $("summary").textContent = `${model.weeks.length} 个教学周 · 每周 ${model.templateCount} 节课 · ${allRows.filter(row => row.canSubmit).length} 节可填写`;
-  $("range-note").textContent = model.range.start
+  setText("summary", `${model.weeks.length} 个教学周 · 每周 ${model.templateCount} 节课 · ${allRows.filter(row => row.canSubmit).length} 节可填写`);
+  setText("range-note", model.range.start
     ? `学校日期范围：${model.range.start} — ${model.range.end}。签到截止：下一周同一天、同一上课时间（马来西亚时间）。${settings.breakStart ? ` Mid break：从 ${settings.breakStart} 起 7 天，不计入教学周。` : ""}`
-    : "尚未读取到学校开放的日期范围。";
+    : "尚未读取到学校开放的日期范围。");
   let preferred = model.weeks.find(week => week.rows.some(row => row.canSubmit))?.number;
   if (!preferred) preferred = model.weeks.find(week => !week.isPast)?.number;
   for (const week of model.weeks) {
@@ -140,10 +161,10 @@ function renderWeeks() {
         input.spellcheck = false;
         input.dataset.key = row.key;
         input.dataset.available = String(row.canSubmit);
-        input.setAttribute("aria-label", `${row.date} ${row.time} ${row.unit} ${row.activity} 签到码`);
-        input.placeholder = row.status === "success" ? "已完成" : row.canSubmit ? "输入签到码" : row.reason || "暂不可填写";
+        input.setAttribute("aria-label", t(`${row.date} ${row.time} ${row.unit} ${row.activity} 签到码`));
+        input.placeholder = t(row.status === "success" ? "已完成" : row.canSubmit ? "输入签到码" : row.reason || "暂不可填写");
         input.value = drafts.get(row.key) || "";
-        input.title = row.reason || "填写老师提供的签到码";
+        input.title = t(row.reason || "填写老师提供的签到码");
         input.addEventListener("input", () => { drafts.set(row.key, input.value); updateControls(); });
         codeCell.append(input);
         const rowText = row.status === "success" ? "已签到" : row.reason || "待签到";
@@ -172,7 +193,7 @@ async function connect() {
       drafts.clear();
       rendered = false;
       settings = settingsForAccount(next, saved);
-      $("result-text").textContent = "";
+      setText("result-text", "");
     }
     setSettingsFields();
     outcomes = same ? outcomes : saved?.outcomes || {};
@@ -184,7 +205,7 @@ async function connect() {
       setSettingsFields();
       await saveSettings();
     }
-    $("account").textContent = demo ? "模拟课堂" : `已连接${next.account ? ` · ${next.account}` : "学校网页"}`;
+    setText("account", demo ? "模拟课堂" : `已连接${next.account ? ` · ${next.account}` : "学校网页"}`);
     status(demo ? "交互预览已就绪" : "固定课表已读取", demo
       ? "可填写的课次输入任意码可演示成功；error 演示失败，unknown 演示结果不明确，队列继续处理其他课程。"
       : "展开教学周，在课程右侧填写签到码，最后统一提交。请设置 Mid break 的开始日期。");
@@ -192,7 +213,7 @@ async function connect() {
     schedule = null;
     model = null;
     drafts.clear();
-    $("account").textContent = "尚未连接";
+    setText("account", "尚未连接");
     status("需要连接学校网页", error.message, "error");
   } finally { busy = false; renderWeeks(); }
 }
@@ -219,7 +240,7 @@ $("submit-all").addEventListener("click", async () => {
   busy = true;
   updateControls();
   $("result-text").hidden = false;
-  $("result-text").textContent = "";
+  setText("result-text", "");
   let done = 0;
   let hasUncertain = false;
   let accountChanged = false;
@@ -243,18 +264,18 @@ $("submit-all").addEventListener("click", async () => {
       }
       outcomes[item.row.key] = { ...result, text: String(result.text || "").split(item.code).join("[签到码已隐藏]"), attempted: true };
       const label = result.status === "success" ? "已确认成功" : result.retryable && !result.uncertain ? "签到码错误，需要修正" : result.status === "unavailable" ? "提交失败或无法签到" : "结果待确认";
-      $("result-text").textContent += `${item.row.date} ${item.row.time} ${item.row.unit} ${item.row.activity}\n${label}\n${result.text}\n\n`;
+      appendText("result-text", `${item.row.date} ${item.row.time} ${item.row.unit} ${item.row.activity}\n${label}\n${result.text}\n\n`);
       done++;
       if (result.uncertain) hasUncertain = true;
     } catch (error) {
       outcomes[item.row.key] = { status: "pending", attempted: true, uncertain: true, text: error.message };
-      $("result-text").textContent += `${item.row.label}\n${error.message}\n\n`;
+      appendText("result-text", `${item.row.label}\n${error.message}\n\n`);
       hasUncertain = true;
     }
     drafts.delete(item.row.key);
     item.code = "";
     renderWeeks();
-    try { await saveRecord(); } catch (error) { $("result-text").textContent += `记录保存失败：${error.message}\n`; }
+    try { await saveRecord(); } catch (error) { appendText("result-text", `记录保存失败：${error.message}\n`); }
   }
   for (const item of batch) item.code = "";
   if (accountChanged) {
@@ -264,7 +285,7 @@ $("submit-all").addEventListener("click", async () => {
     busy = false;
     renderRate();
     renderWeeks();
-    $("account").textContent = "账户已变化或无法核实";
+    setText("account", "账户已变化或无法核实");
     status("已停止提交，请重新连接", "学校登录账户已变化或无法核实。剩余课次未提交，已清空输入的签到码。", "warning");
     return;
   }
@@ -281,7 +302,7 @@ $("submit-all").addEventListener("click", async () => {
       busy = false;
       renderRate();
       renderWeeks();
-      $("account").textContent = "账户已变化";
+      setText("account", "账户已变化");
       status("请重新连接", "学校账户已切换，请重新连接以载入对应设置和记录。", "warning");
       return;
     }
@@ -305,10 +326,17 @@ $("open-site").addEventListener("click", async () => {
   try { await adapter.openSite(); }
   catch { status("无法打开网页", "请手动打开学校签到网站。", "error"); }
 });
+$("language-toggle").addEventListener("click", async () => {
+  if (busy) return;
+  const next = getLanguage() === "en" ? "zh-CN" : "en";
+  try { await saveLanguage(storage, next); }
+  catch { setLanguage(next); } // Still allow switching when local storage is unavailable.
+  renderLanguage();
+  renderWeeks();
+  renderRate();
+});
 $("demo-banner").hidden = !demo;
-$("today").textContent = new Intl.DateTimeFormat("zh-CN", {
-  timeZone: "Asia/Kuala_Lumpur", month: "long", day: "numeric", weekday: "long"
-}).format(new Date());
+renderLanguage();
 setSettingsFields();
 status("准备开始", "先在学校网页登录，再连接课表并设置学期日期。");
 renderWeeks();
