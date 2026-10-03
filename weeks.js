@@ -117,6 +117,7 @@ export function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) 
           else if (date > range.end) { status = "pending"; reason = "未开放"; canSubmit = false; }
           else if (!course?.url) { status = "unavailable"; reason = "无签到入口"; canSubmit = false; }
         }
+        const entryAvailable = canSubmit;
         const outcome = outcomes[key];
         if (outcome && status !== "success") {
           status = outcome.uncertain ? "pending" : courseStatus(outcome);
@@ -137,9 +138,10 @@ export function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) 
         const isPass = /\bPASS\b/i.test(template.label);
         const excluded = isPass && !settings.includePass;
         if (excluded) { status = "empty"; reason = "PASS 不计入辅助签到"; canSubmit = false; }
-        if (outcome?.text && status !== "success" && !excluded && outcome.retryable && start !== null && nowTime >= start && nowTime < start + 7 * DAY) {
+        if (outcome?.retryable && !outcome.uncertain && status !== "success" && !excluded && entryAvailable && start !== null && nowTime >= start && nowTime < start + 7 * DAY) {
+          status = "correction";
           reason = "签到码错误，请修改后重试";
-          canSubmit = Boolean(course?.url) && !excluded && nowTime >= start && nowTime < start + 7 * DAY;
+          canSubmit = true;
         }
         rows.push({ isPass, excluded, key, date, time: template.time, unit: template.unit, activity: template.activity,
           activityType: template.activityType, activityNumber: template.activityNumber,
@@ -150,7 +152,8 @@ export function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) 
       || a.unit.localeCompare(b.unit) || a.activity.localeCompare(b.activity));
     const included = rows.filter(row => !row.excluded);
     const status = !included.length ? "empty" : included.every(row => row.status === "success") ? "success"
-      : included.some(row => row.status === "unavailable") ? "unavailable" : "pending";
+      : included.some(row => row.status === "unavailable") ? "unavailable"
+      : included.some(row => row.status === "correction") ? "correction" : "pending";
     weeks.push({ number, start: dates[0], end: dates.at(-1), rows, status,
       isPast: Boolean(range.start && dates.at(-1) < range.start),
       isFuture: Boolean(range.end && dates[0] > range.end) });

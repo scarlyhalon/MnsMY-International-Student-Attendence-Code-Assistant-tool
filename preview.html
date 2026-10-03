@@ -228,6 +228,9 @@ input:disabled, select:disabled { color: #919daf; background: #f9fafc; border-co
 #overall-rate { font-size: 2rem; margin-left: 12px; }
 #rate-help { font-size: 12px; margin: 6px 0 0; }
 
+[data-state="correction"] > .status-icon { background: #fff0d8; color: #a45d0b; }
+.week-state[data-state="correction"], .course-state[data-state="correction"] { color: #a45d0b; }
+
 </style>
     
   </head>
@@ -236,7 +239,7 @@ input:disabled, select:disabled { color: #919daf; background: #f9fafc; border-co
       <header class="app-header">
         <div class="brand">
           <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5.5" width="16" height="15" rx="4" stroke="currentColor" stroke-width="1.7"/><path d="M8 3.5v4M16 3.5v4M4.5 10h15M9 15l2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
-          <div><span class="brand-name">签到助手</span><span class="brand-caption">个人工具 · v0.3.2</span></div>
+          <div><span class="brand-name">签到助手</span><span class="brand-caption">个人工具 · v0.3.3</span></div>
         </div>
         <button class="button button-text" id="open-site" type="button">打开学校网页 <span aria-hidden="true">↗</span></button>
       </header>
@@ -272,7 +275,7 @@ input:disabled, select:disabled { color: #919daf; background: #f9fafc; border-co
         </section>
 
         <section class="semester-section" aria-labelledby="weeks-title">
-          <div class="semester-heading"><div><p class="eyebrow" id="range-note">YOUR TEACHING WEEKS</p><h2 id="weeks-title">每周课程</h2><p id="summary">展开教学周，查看固定课表与每节课的签到状态。</p></div><div class="legend" aria-label="签到状态说明"><span class="legend-item" data-state="pending"><span class="status-icon" aria-hidden="true">?</span>待处理 / 未开放</span><span class="legend-item" data-state="unavailable"><span class="status-icon" aria-hidden="true">×</span>不可签到 / 失败</span><span class="legend-item" data-state="success"><span class="status-icon" aria-hidden="true">✓</span>全部完成</span><span class="legend-item" data-state="empty"><span class="status-icon" aria-hidden="true">−</span>无课次</span></div></div>
+          <div class="semester-heading"><div><p class="eyebrow" id="range-note">YOUR TEACHING WEEKS</p><h2 id="weeks-title">每周课程</h2><p id="summary">展开教学周，查看固定课表与每节课的签到状态。</p></div><div class="legend" aria-label="签到状态说明"><span class="legend-item" data-state="pending"><span class="status-icon" aria-hidden="true">?</span>待处理 / 未开放</span><span class="legend-item" data-state="correction"><span class="status-icon" aria-hidden="true">!</span>签到码需要修正</span><span class="legend-item" data-state="unavailable"><span class="status-icon" aria-hidden="true">×</span>不可签到 / 失败</span><span class="legend-item" data-state="success"><span class="status-icon" aria-hidden="true">✓</span>全部完成</span><span class="legend-item" data-state="empty"><span class="status-icon" aria-hidden="true">−</span>无课次</span></div></div>
           <div id="weeks"></div>
         </section>
 
@@ -402,6 +405,7 @@ function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) {
           else if (date > range.end) { status = "pending"; reason = "未开放"; canSubmit = false; }
           else if (!course?.url) { status = "unavailable"; reason = "无签到入口"; canSubmit = false; }
         }
+        const entryAvailable = canSubmit;
         const outcome = outcomes[key];
         if (outcome && status !== "success") {
           status = outcome.uncertain ? "pending" : courseStatus(outcome);
@@ -422,9 +426,10 @@ function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) {
         const isPass = /\bPASS\b/i.test(template.label);
         const excluded = isPass && !settings.includePass;
         if (excluded) { status = "empty"; reason = "PASS 不计入辅助签到"; canSubmit = false; }
-        if (outcome?.text && status !== "success" && !excluded && outcome.retryable && start !== null && nowTime >= start && nowTime < start + 7 * DAY) {
+        if (outcome?.retryable && !outcome.uncertain && status !== "success" && !excluded && entryAvailable && start !== null && nowTime >= start && nowTime < start + 7 * DAY) {
+          status = "correction";
           reason = "签到码错误，请修改后重试";
-          canSubmit = Boolean(course?.url) && !excluded && nowTime >= start && nowTime < start + 7 * DAY;
+          canSubmit = true;
         }
         rows.push({ isPass, excluded, key, date, time: template.time, unit: template.unit, activity: template.activity,
           activityType: template.activityType, activityNumber: template.activityNumber,
@@ -435,7 +440,8 @@ function buildWeeks(schedule, settings, outcomes = {}, now = new Date()) {
       || a.unit.localeCompare(b.unit) || a.activity.localeCompare(b.activity));
     const included = rows.filter(row => !row.excluded);
     const status = !included.length ? "empty" : included.every(row => row.status === "success") ? "success"
-      : included.some(row => row.status === "unavailable") ? "unavailable" : "pending";
+      : included.some(row => row.status === "unavailable") ? "unavailable"
+      : included.some(row => row.status === "correction") ? "correction" : "pending";
     weeks.push({ number, start: dates[0], end: dates.at(-1), rows, status,
       isPast: Boolean(range.start && dates.at(-1) < range.start),
       isFuture: Boolean(range.end && dates[0] > range.end) });
@@ -548,7 +554,7 @@ let outcomes = {};
 let model = null;
 let busy = false;
 let rendered = false;
-const symbols = { pending: "?", unavailable: "×", success: "✓", empty: "–" };
+const symbols = { correction: "!", pending: "?", unavailable: "×", success: "✓", empty: "–" };
 const dateLabel = date => new Intl.DateTimeFormat("zh-CN", {
   timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short"
 }).format(new Date(`${date}T12:00:00Z`));
@@ -639,7 +645,7 @@ function renderWeeks() {
     const done = included.filter(row => row.status === "success").length;
     const weekText = missingHistory ? "历史记录未读取" : week.status === "success" ? "全部完成" : week.status === "unavailable"
       ? (week.rows.some(row => row.canSubmit) ? "部分课次无法签到" : "无法签到")
-      : future ? "未开放" : week.status === "empty" ? "无须签到" : `待完成 · ${done}/${included.length}`;
+      : week.status === "correction" ? "有签到码需要修正" : future ? "未开放" : week.status === "empty" ? "无须签到" : `待完成 · ${done}/${included.length}`;
     header.append(heading, stateBadge(week.status, weekText, "week-state"));
     const body = element("div", "week-body");
     if (!week.rows.length) body.append(element("p", "empty-week", "尚未保存这一周的课程记录。"));
@@ -766,7 +772,7 @@ $("submit-all").addEventListener("click", async () => {
         break;
       }
       outcomes[item.row.key] = { ...result, text: String(result.text || "").split(item.code).join("[签到码已隐藏]"), attempted: true };
-      const label = result.status === "success" ? "已确认成功" : result.status === "unavailable" ? "提交失败或无法签到" : "结果待确认";
+      const label = result.status === "success" ? "已确认成功" : result.retryable && !result.uncertain ? "签到码错误，需要修正" : result.status === "unavailable" ? "提交失败或无法签到" : "结果待确认";
       $("result-text").textContent += `${item.row.date} ${item.row.time} ${item.row.unit} ${item.row.activity}\n${label}\n${result.text}\n\n`;
       done++;
       if (result.uncertain) hasUncertain = true;

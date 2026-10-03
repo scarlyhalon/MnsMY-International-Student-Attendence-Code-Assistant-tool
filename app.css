@@ -219,3 +219,6 @@ input:disabled, select:disabled { color: #919daf; background: #f9fafc; border-co
 
 #overall-rate { font-size: 2rem; margin-left: 12px; }
 #rate-help { font-size: 12px; margin: 6px 0 0; }
+
+[data-state="correction"] > .status-icon { background: #fff0d8; color: #a45d0b; }
+.week-state[data-state="correction"], .course-state[data-state="correction"] { color: #a45d0b; }

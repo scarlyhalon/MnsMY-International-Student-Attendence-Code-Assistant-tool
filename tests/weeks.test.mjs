@@ -229,3 +229,44 @@ test("row status stays concise while raw feedback remains outside the model", ()
   assert.equal(result.weeks[1].rows[0].reason, "提交失败 / 无法签到");
   assert.equal(result.weeks[1].rows[0].canSubmit, false);
 });
+
+
+test("retryable wrong codes show correction on the row and week, including saved outcomes", () => {
+  const data = schedule([course("15_Sep_26")]);
+  const key = buildWeeks(data, settings, {}, now).weeks[1].rows[0].key;
+  const outcomes = { [key]: { status: "unavailable", retryable: true, attempted: true, text: "Invalid code" } };
+  const week = buildWeeks(data, settings, JSON.parse(JSON.stringify(outcomes)), now).weeks[1];
+  assert.equal(week.status, "correction");
+  assert.equal(week.rows[0].status, "correction");
+  assert.equal(week.rows[0].canSubmit, true);
+  assert.match(week.rows[0].reason, /签到码错误/);
+  outcomes[key] = { status: "success", attempted: true };
+  assert.equal(buildWeeks(data, settings, outcomes, now).weeks[1].status, "success");
+});
+
+test("wrong-code correction expires precisely at cutoff and does not reopen unavailable entries", () => {
+  const data = schedule([course("15_Sep_26")]);
+  const key = buildWeeks(data, settings, {}, now).weeks[1].rows[0].key;
+  const outcomes = { [key]: { status: "unavailable", retryable: true, attempted: true } };
+  const before = new Date("2026-09-22T13:59:59.999+08:00");
+  assert.equal(buildWeeks(data, settings, outcomes, before).weeks[1].status, "correction");
+  const expired = buildWeeks(data, settings, outcomes, new Date("2026-09-22T14:00:00+08:00")).weeks[1];
+  assert.equal(expired.status, "unavailable");
+  assert.equal(expired.rows[0].canSubmit, false);
+  for (const changes of [{ url: undefined }, { status: "closed" }]) {
+    const blocked = { ...data, courses: [{ ...data.courses[0], ...changes }] };
+    const row = buildWeeks(blocked, settings, outcomes, now).weeks[1].rows[0];
+    assert.equal(row.status, "unavailable");
+    assert.equal(row.canSubmit, false);
+  }
+});
+
+test("closed course takes week priority over correction, while excluded PASS does not", () => {
+  const data = schedule([course("15_Sep_26"), course("16_Sep_26", "2:00 pm FIT2102 PASS 01", "closed")]);
+  const key = buildWeeks(data, settings, {}, now).weeks[1].rows[0].key;
+  const outcomes = { [key]: { status: "unavailable", retryable: true, attempted: true } };
+  assert.equal(buildWeeks(data, settings, outcomes, now).weeks[1].status, "correction");
+  const enabled = buildWeeks(data, { ...settings, includePass: true }, outcomes, now).weeks[1];
+  assert.equal(enabled.rows[0].status, "correction");
+  assert.equal(enabled.status, "unavailable");
+});

@@ -24,7 +24,7 @@ let outcomes = {};
 let model = null;
 let busy = false;
 let rendered = false;
-const symbols = { pending: "?", unavailable: "×", success: "✓", empty: "–" };
+const symbols = { correction: "!", pending: "?", unavailable: "×", success: "✓", empty: "–" };
 const dateLabel = date => new Intl.DateTimeFormat("zh-CN", {
   timeZone: "UTC", month: "numeric", day: "numeric", weekday: "short"
 }).format(new Date(`${date}T12:00:00Z`));
@@ -115,7 +115,7 @@ function renderWeeks() {
     const done = included.filter(row => row.status === "success").length;
     const weekText = missingHistory ? "历史记录未读取" : week.status === "success" ? "全部完成" : week.status === "unavailable"
       ? (week.rows.some(row => row.canSubmit) ? "部分课次无法签到" : "无法签到")
-      : future ? "未开放" : week.status === "empty" ? "无须签到" : `待完成 · ${done}/${included.length}`;
+      : week.status === "correction" ? "有签到码需要修正" : future ? "未开放" : week.status === "empty" ? "无须签到" : `待完成 · ${done}/${included.length}`;
     header.append(heading, stateBadge(week.status, weekText, "week-state"));
     const body = element("div", "week-body");
     if (!week.rows.length) body.append(element("p", "empty-week", "尚未保存这一周的课程记录。"));
@@ -242,7 +242,7 @@ $("submit-all").addEventListener("click", async () => {
         break;
       }
       outcomes[item.row.key] = { ...result, text: String(result.text || "").split(item.code).join("[签到码已隐藏]"), attempted: true };
-      const label = result.status === "success" ? "已确认成功" : result.status === "unavailable" ? "提交失败或无法签到" : "结果待确认";
+      const label = result.status === "success" ? "已确认成功" : result.retryable && !result.uncertain ? "签到码错误，需要修正" : result.status === "unavailable" ? "提交失败或无法签到" : "结果待确认";
       $("result-text").textContent += `${item.row.date} ${item.row.time} ${item.row.unit} ${item.row.activity}\n${label}\n${result.text}\n\n`;
       done++;
       if (result.uncertain) hasUncertain = true;
