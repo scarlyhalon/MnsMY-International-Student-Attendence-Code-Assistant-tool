@@ -39,6 +39,17 @@ export function readSchedule() {
   return { days, courses, selectedDay: select.value, account };
 }
 
+// The statistics page can default to an empty historical semester.
+// Use the school's actual option values, ordered by the displayed year/semester.
+export function readSemesterOptions() {
+  const select = document.getElementById("semesterSel");
+  return Array.from(select?.options || []).map(option => {
+    const match = option.textContent.trim().match(/^Semester\s+(\d+)\s*,\s*(\d{4})$/i);
+    return match && option.value && !option.disabled
+      ? { value: option.value, year: Number(match[2]), semester: Number(match[1]) } : null;
+  }).filter(Boolean).sort((a, b) => b.year - a.year || b.semester - a.semester).map(option => option.value);
+}
+
 export function readSemester() {
   const text = document.getElementById("ctl00_ContentPlaceHolder1_periodBox")?.textContent || "";
   const match = text.match(/\b(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\b/);

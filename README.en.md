@@ -54,7 +54,7 @@ The extension never substitutes another week's attendance link for a missing ent
 
 ## Overall attendance and PASS
 
-- The overall percentage comes directly from the school homepage, not an average calculated by the extension. It refreshes on connection and after batch processing.
+- The overall percentage comes directly from the school statistics page for the selected semester, not an average calculated by the extension. It refreshes on connection and after batch processing.
 - Below 80%, the number turns red and a link to [AskMira](https://askmira.monash.edu.my/) appears. If the percentage cannot be read, the interface shows **Not loaded**.
 - Classes containing the standalone word `PASS` are visible but excluded from assisted attendance by default. Enable **Include PASS classes** if you need to submit them. This switch does not change the official percentage.
 
@@ -110,6 +110,7 @@ A push of a `v*` tag triggers the GitHub Actions release workflow. The tag must 
 
 ## Recent changes
 
+- **v0.3.5:** Fixed connection failures when the statistics page defaults to an empty historical semester. Selects the latest started semester, reads its official attendance rate, and allows connection after teaching ends while keeping the seven-day deadline.
 - **v0.3.4:** English by default, a persistent English/Chinese switch, and this English README.
 - **v0.3.3:** Incorrect codes that can still be corrected show an orange warning instead of being treated as unavailable.
 - **v0.3.2:** Fixed account verification on entry pages that omit the student's name.

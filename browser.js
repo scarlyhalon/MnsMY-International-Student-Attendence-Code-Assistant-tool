@@ -1,4 +1,4 @@
-import { readSessionAccount, readOverallRate, readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult } from "./page.js";
+import { readSessionAccount, readOverallRate, readSchedule, readSemester, readSemesterOptions, submitAttendance, readPageResult, classifyAttendanceResult } from "./page.js";
 
 const HOME = "https://attendance.monash.edu.my/student/";
 const UNITS = `${HOME}Units.aspx`;
@@ -50,17 +50,32 @@ export function createBrowserAdapter() {
       await waitForSchoolPage(HOME);
       const account = await run(readSessionAccount);
       if (!account) throw new Error("无法核实学校账户，请重新登录后连接。");
-      const overallRate = await run(readOverallRate);
       await chrome.tabs.update(tabId, { url: INFO });
       await waitForSchoolPage(INFO);
-      const semester = await run(readSemester);
+      const options = await run(readSemesterOptions);
+      const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+      let semester = null;
+      if (!options.length) semester = await run(readSemester);
+      for (const value of options) {
+        const url = `${INFO}?s=${encodeURIComponent(value)}`;
+        await chrome.tabs.update(tabId, { url });
+        await waitForSchoolPage(url);
+        const candidate = await run(readSemester);
+        // Keep the latest started semester after teaching ends: its last
+        // classes may still have open attendance entries for seven days.
+        if (candidate?.start && candidate.start <= today) { semester = candidate; break; }
+      }
+      if (!semester?.start || semester.start > today) {
+        throw new Error("未读取到有效的学期日期，请在学校出勤统计页检查当前学期后重新连接。");
+      }
+      const overallRate = await run(readOverallRate);
       // Navigate with GET, including when the current tab is a submitted form.
       await chrome.tabs.update(tabId, { url: UNITS });
       await waitForSchoolPage(UNITS);
       const schedule = await run(readSchedule);
       if (!schedule) throw new Error("未读取到课程列表，请检查学校网页是否已登录或是否变更了页面。");
-      if (!semester?.start || schedule.account !== account || await run(readSessionAccount) !== account) {
-        throw new Error("连接期间账户已变化，或无法读取学期，请重新连接。");
+      if (schedule.account !== account || await run(readSessionAccount) !== account) {
+        throw new Error("连接期间账户已变化，请重新连接。");
       }
       connectedAccount = account;
       return { ...schedule, semester, overallRate };

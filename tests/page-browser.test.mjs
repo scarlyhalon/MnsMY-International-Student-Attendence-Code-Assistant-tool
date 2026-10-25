@@ -32,6 +32,7 @@ function pageFixture({ url = ENTRY, valid = true, inputPresent = true, formPrese
   let select = null;
   let anchors = [];
   let period = null;
+  let semesters = null;
   let account = null;
   let panels = [];
   let rate = null;
@@ -39,6 +40,7 @@ function pageFixture({ url = ENTRY, valid = true, inputPresent = true, formPrese
     getElementById(id) {
       if (id === "ctl00_ContentPlaceHolder1_attendanceInfoBox") return rate;
       if (id === "daySel") return select;
+      if (id === "semesterSel") return semesters;
       if (id === "ctl00_ContentPlaceHolder1_periodBox") return period;
       if (id === "ctl00_ContentPlaceHolder1_userName") return account;
       return id === "ctl00_ContentPlaceHolder1_sessionCode" && inputPresent ? input : null;
@@ -49,11 +51,12 @@ function pageFixture({ url = ENTRY, valid = true, inputPresent = true, formPrese
   };
   class Clock extends Date { static now() { return now(); } }
   const context = vm.createContext({ document, location: { href: url }, URL, HTMLInputElement: Input, Event, Date: Clock });
-  vm.runInContext(pageSource.replaceAll("export function", "function").replaceAll("export async function", "async function") + "\nthis.api = { readOverallRate, readSchedule, readSemester, submitAttendance, readPageResult, classifyAttendanceResult };", context);
+  vm.runInContext(pageSource.replaceAll("export function", "function").replaceAll("export async function", "async function") + "\nthis.api = { readOverallRate, readSchedule, readSemester, readSemesterOptions, submitAttendance, readPageResult, classifyAttendanceResult };", context);
   return { ...context.api, calls, input, button, document,
     panels(value) { panels = value; },
     rate(text) { rate = { textContent: text }; },
     period(text) { period = { textContent: text }; },
+    semesters(options) { semesters = { options }; },
     account(text) { account = { textContent: text }; },
     schedule(days, links) {
       select = { options: days, value: days[0].value };
@@ -217,6 +220,7 @@ test("in-page deadline is rechecked immediately before clicking", () => {
 
 function adapterFixture({ submitError = false, unchanged = false, submitted = true,
   beforeText = "Original entry form", resultText = "Invalid attendance code", now = Date.now,
+  semesterOptions = [], semesterAt = () => ({ start: "2026-07-27", end: "2026-10-23" }), rateAt = () => 79,
   onEntryReady = () => {}, completed = false, newDocument = false, sessionAccount = () => "Example Student", resultAccount = "Example Student" } = {}) {
   const calls = [];
   let current = { id: 1, windowId: 2, url: `${HOME}Units.aspx`, status: "complete" };
@@ -243,9 +247,10 @@ function adapterFixture({ submitError = false, unchanged = false, submitted = tr
       async executeScript({ func, args }) {
         calls.push(["script", func.name, args]);
         if (func.name === "readSessionAccount") return [{ result: sessionAccount() }];
-        if (func.name === "readOverallRate") return [{ result: 79 }];
+        if (func.name === "readOverallRate") return [{ result: rateAt(current.url) }];
         if (func.name === "readSchedule") return [{ result: completed ? { ...SCHEDULE, courses: [{ ...COURSE, status: "success" }] } : SCHEDULE }];
-        if (func.name === "readSemester") return [{ result: { start: "2026-07-27", end: "2026-10-23" } }];
+        if (func.name === "readSemester") return [{ result: semesterAt(current.url) }];
+        if (func.name === "readSemesterOptions") return [{ result: semesterOptions }];
         if (func.name === "submitAttendance") {
           assert.equal(current.url, ENTRY);
           assert.equal(current.status, "complete");
@@ -259,7 +264,7 @@ function adapterFixture({ submitError = false, unchanged = false, submitted = tr
     }
   };
   class Clock extends Date { static now() { return now(); } }
-  const context = vm.createContext({ chrome, URL, Date: Clock, readSessionAccount() {}, readOverallRate() {}, readSchedule() {}, readSemester() {}, submitAttendance() {}, readPageResult() {},
+  const context = vm.createContext({ chrome, URL, Date: Clock, readSessionAccount() {}, readOverallRate() {}, readSchedule() {}, readSemester() {}, readSemesterOptions() {}, submitAttendance() {}, readPageResult() {},
     classifyAttendanceResult: pageFixture().classifyAttendanceResult, setTimeout(fn) { queueMicrotask(fn); } });
   vm.runInContext(browserSource.replace(/^import.*\r?\n/, "").replace("export function", "function") + "\nthis.adapter = createBrowserAdapter();", context);
   return { adapter: context.adapter, calls, setCurrent(url) { current = { ...current, url, status: "complete" }; queuedTabs = []; } };
@@ -404,7 +409,7 @@ test("all day panels preserve completed and future static sessions", () => {
   assert.equal(result.courses[1].url, undefined);
 });
 
-test("overall rate reads only the official homepage summary", () => {
+test("overall rate reads only the official summary element", () => {
   const page = pageFixture();
   assert.equal(page.readOverallRate(), null);
   page.rate("Overall attendance rate: 79.5% (Semester 2, 2026)");
@@ -501,4 +506,54 @@ test("nameless result still blocks an account change after the click", async () 
   await adapter.connect();
   const result = await adapter.submit(COURSE, "test-code");
   assert.equal(result.accountChanged, true);
+});
+
+
+test("semester choices use observed values and sort by year and semester", () => {
+  const page = pageFixture();
+  assert.deepEqual(Array.from(page.readSemesterOptions()), []);
+  page.semesters([
+    { value: "2", textContent: "Semester 2, 2026" },
+    { value: "", textContent: "Select semester" },
+    { value: "99", textContent: "Semester 3, 2025" },
+    { value: "7", textContent: "Semester 1, 2026" },
+    { value: "8", textContent: "Semester 3, 2026", disabled: true }
+  ]);
+  assert.deepEqual(Array.from(page.readSemesterOptions()), ["2", "7", "99"]);
+});
+
+test("connect selects the current semester when default historical period is empty, including after Week 12", async () => {
+  const { adapter, calls } = adapterFixture({
+    now: () => Date.parse("2026-10-25T23:00:00+08:00"),
+    semesterOptions: ["2", "1", "0"],
+    semesterAt: url => new URL(url).searchParams.get("s") === "2"
+      ? { start: "2026-07-27", end: "2026-10-23" } : null,
+    rateAt: url => new URL(url).searchParams.get("s") === "2" ? 87 : null
+  });
+  const result = await adapter.connect();
+  assert.equal(result.semester.start, "2026-07-27");
+  assert.equal(result.semester.end, "2026-10-23");
+  assert.equal(result.overallRate, 87);
+  assert.ok(calls.some(call => call[0] === "navigate" && call[1] === `${HOME}AttendanceInfo.aspx?s=2`));
+  assert.equal(calls.filter(call => call[0] === "script" && call[1] === "submitAttendance").length, 0);
+});
+
+test("connect skips future and empty semesters instead of assigning records to them", async () => {
+  const { adapter } = adapterFixture({
+    now: () => Date.parse("2026-10-25T23:00:00+08:00"),
+    semesterOptions: ["future", "empty", "current"],
+    semesterAt: url => ({
+      future: { start: "2027-02-01", end: "2027-05-01" },
+      current: { start: "2026-07-27", end: "2026-10-23" }
+    })[new URL(url).searchParams.get("s")] || null
+  });
+  assert.equal((await adapter.connect()).semester.start, "2026-07-27");
+});
+
+test("missing semester and account changes remain distinct blocking connection errors", async () => {
+  const missing = adapterFixture({ semesterAt: () => null });
+  await assert.rejects(missing.adapter.connect(), /未读取到有效的学期日期/);
+  let checks = 0;
+  const changed = adapterFixture({ sessionAccount: () => ++checks === 1 ? "Example Student" : "Other Student" });
+  await assert.rejects(changed.adapter.connect(), /账户已变化/);
 });

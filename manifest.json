@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Attendance Helper · 签到助手",
   "description": "Submit teacher-provided attendance codes through your signed-in school session. English / 中文. Unofficial personal tool.",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "permissions": ["scripting", "storage"],
   "host_permissions": ["https://attendance.monash.edu.my/*"],
   "background": { "service_worker": "background.js" },

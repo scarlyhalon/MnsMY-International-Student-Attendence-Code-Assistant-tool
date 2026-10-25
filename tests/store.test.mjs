@@ -81,3 +81,27 @@ test("calendar and PASS settings are isolated by account and semester and surviv
   const nextTerm = { ...a, semester: { start: "2027-02-01" } };
   assert.equal(settingsForAccount(nextTerm, await store.load(recordKey(nextTerm))).startDate, "2027-02-01");
 });
+
+test("Week 12 entries remain visible and usable after teaching ends until each seven-day deadline", () => {
+  const recent = {
+    account: "one", semester: { start: "2026-07-27", end: "2026-10-23" },
+    days: [{ value: "2026-10-14" }, { value: "2026-10-28" }],
+    courses: [
+      course("2026-10-19", "2:00 pm FIT2014 Seminar 01-P1"),
+      course("2026-10-22", "3:00 pm FIT2102 Tutorial 07"),
+      course("2026-10-23", "10:00 am FIT2109 Tutorial 03")
+    ]
+  };
+  const calendar = { startDate: "2026-07-27", weekCount: 12, breakStart: "2026-09-21" };
+  const afterTeaching = new Date("2026-10-26T13:59:59+08:00");
+  const data = mergeScan(null, recent, afterTeaching);
+  assert.equal(data.templateCourses.length, 0);
+  const week = buildWeeks(data, calendar, {}, afterTeaching).weeks[11];
+  assert.equal(week.start, "2026-10-19");
+  assert.equal(week.rows.length, 3);
+  assert.equal(week.rows.every(row => row.canSubmit), true);
+  const atCutoff = buildWeeks(data, calendar, {}, new Date("2026-10-26T14:00:00+08:00")).weeks[11];
+  assert.equal(atCutoff.rows[0].canSubmit, false);
+  assert.equal(atCutoff.rows[1].canSubmit, true);
+  assert.equal(atCutoff.rows[2].canSubmit, true);
+});
